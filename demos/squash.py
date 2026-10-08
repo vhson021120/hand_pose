@@ -4,7 +4,7 @@ FILE = Path(__file__).absolute()
 sys.path.append(FILE.parents[1].as_posix())  # add kapao/ to path
 
 import argparse
-from pytube import YouTube
+from pytubefix import YouTube
 import os.path as osp
 from utils.torch_utils import select_device, time_sync
 from utils.general import check_img_size
@@ -22,6 +22,8 @@ import gdown
 
 VIDEO_NAME = 'Squash MegaRally 176 ReDux - Slow Mo Edition.mp4'
 URL = 'https://www.youtube.com/watch?v=Dy62-eTNvY4&ab_channel=PSASQUASHTV'
+VIDEO_DIR = FILE.parents[1] / 'media' / 'videos' / 'demo'
+VIDEO_PATH = VIDEO_DIR / VIDEO_NAME
 
 GRAY = (200, 200, 200)
 CROWD_THRES = 450  # max bbox size for crowd classification
@@ -44,7 +46,7 @@ if __name__ == '__main__':
     parser = argparse.ArgumentParser()
     parser.add_argument('--data', type=str, default='data/coco-kp.yaml')
     parser.add_argument('--imgsz', type=int, default=1280)
-    parser.add_argument('--weights', default='kapao_s_coco.pt')
+    parser.add_argument('--weights', default=str(FILE.parents[1] / 'weights' / 'kapao_s_coco.pt'))
     parser.add_argument('--device', default='', help='cuda device, i.e. 0 or cpu')
     parser.add_argument('--half', action='store_true')
     parser.add_argument('--conf-thres', type=float, default=0.5, help='confidence threshold')
@@ -79,19 +81,23 @@ if __name__ == '__main__':
     data['flips'] = [None if f == -1 else f for f in args.flips]
     data['count_fused'] = False
 
-    if not osp.isfile(VIDEO_NAME):
+    VIDEO_DIR.mkdir(parents=True, exist_ok=True)
+    if not osp.isfile(VIDEO_PATH):
         try:
             yt = YouTube(URL)
             # [print(s) for s in yt.streams]
             stream = [s for s in yt.streams if s.itag == 137][0]  # 1080p, 25 fps
             print('Downloading squash demo video...')
-            stream.download()
+            stream.download(output_path=str(VIDEO_DIR), filename=VIDEO_NAME)
             print('Done.')
         except Exception as e:
             print('Pytube error: {}'.format(e))
             print('We are working on a patch for pytube...')
             print('Fetching backup demo video from google drive')
-            gdown.download("https://drive.google.com/uc?id=1S46QDdv0pnU98mNXxechvIVK8qOBFlkl")
+            gdown.download(
+                "https://drive.google.com/uc?id=1S46QDdv0pnU98mNXxechvIVK8qOBFlkl",
+                output=str(VIDEO_PATH),
+            )
 
     device = select_device(args.device, batch_size=1)
     print('Using device: {}'.format(device))
@@ -103,7 +109,7 @@ if __name__ == '__main__':
     stride = int(model.stride.max())  # model stride
 
     imgsz = check_img_size(args.imgsz, s=stride)  # check image size
-    dataset = LoadImages('./{}'.format(VIDEO_NAME), img_size=imgsz, stride=stride, auto=True)
+    dataset = LoadImages(str(VIDEO_PATH), img_size=imgsz, stride=stride, auto=True)
 
     if device.type != 'cpu':
         model(torch.zeros(1, 3, imgsz, imgsz).to(device).type_as(next(model.parameters())))  # run once
@@ -115,7 +121,7 @@ if __name__ == '__main__':
     h = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
     w = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH))
     gif_frames = []
-    video_name = 'squash_inference_{}'.format(osp.splitext(args.weights)[0])
+    video_name = str(VIDEO_DIR / 'squash_inference_{}'.format(Path(args.weights).stem))
 
     if not args.display:
         writer = cv2.VideoWriter(video_name + '.mp4',

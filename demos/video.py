@@ -4,7 +4,7 @@ FILE = Path(__file__).absolute()
 sys.path.append(FILE.parents[1].as_posix())  # add kapao/ to path
 
 import argparse
-from pytube import YouTube
+from pytubefix import YouTube
 import os.path as osp
 from utils.torch_utils import select_device, time_sync
 from utils.general import check_img_size
@@ -16,6 +16,8 @@ import yaml
 from tqdm import tqdm
 import imageio
 from val import run_nms, post_process_batch
+from utils.hand_kapo_fusion import HandKapoFusion
+from utils.pose_tracking import ControlPoseTracker
 import numpy as np
 import gdown
 import csv
@@ -31,6 +33,15 @@ DEMO_BACKUP = {
     '2DiQUX11YaY': ['1E1azSUE5KXHvCCuFvvM6yUjQDmP3EuSx', '2DiQUX11YaY_720p.mp4'],
     'nrchfeybHmw': ['1Q8awNjA6W4gePbWE5cSAu83CwjiwD0_w', 'nrchfeybHmw_480p.mp4']
 }
+CONTROL_BODY_POINTS = (5, 6, 7, 8, 9, 10)
+CONTROL_BODY_CONNECTIONS = ((5, 7), (7, 9), (6, 8), (8, 10))
+LEFT_BODY_POINTS = (5, 7, 9)
+RIGHT_BODY_POINTS = (6, 8, 10)
+BODY_POINT_LABELS = {5: 'LS', 6: 'RS', 7: 'LE', 8: 'RE', 9: 'LW', 10: 'RW'}
+LEFT_COLOR = (0, 220, 0)
+RIGHT_COLOR = (255, 0, 255)
+CONTROL_HAND_POINTS = (0, 1, 2, 3, 4, 5, 6, 7, 8)
+CONTROL_HAND_CONNECTIONS = ((0, 1), (1, 2), (2, 3), (3, 4), (0, 5), (5, 6), (6, 7), (7, 8))
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser()
@@ -41,7 +52,16 @@ if __name__ == '__main__':
     parser.add_argument('--tag', type=int, default=135, help='stream tag, 137=1080p, 136=720p, 135=480p')
     parser.add_argument('--color', type=int, nargs='+', default=[255, 255, 255], help='pose color')
     parser.add_argument('--face', action='store_true', help='plot face keypoints')
+    parser.add_argument('--full-pose', action='store_true', help='show all 17 body keypoints instead of the control subset')
+    parser.add_argument('--full-hand', action='store_true', help='show all 21 hand keypoints instead of thumb/index')
+    parser.add_argument('--show-person-boxes', action='store_true', help='show person bounding boxes')
     parser.add_argument('--display', action='store_true', help='display inference results')
+    hand_group = parser.add_mutually_exclusive_group()
+    hand_group.add_argument('--hand', dest='use_hand', action='store_true', help='enable MediaPipe hand landmarks')
+    hand_group.add_argument('--no-hand', dest='use_hand', action='store_false', help='disable MediaPipe hand landmarks')
+    parser.set_defaults(use_hand=True)
+    parser.add_argument('--frame-stride', type=int, default=1,
+                        help='run inference on every Nth video frame; use >1 for realtime CPU playback')
     parser.add_argument('--fps-size', type=int, default=1)
     parser.add_argument('--gif', action='store_true', help='create gif')
     parser.add_argument('--gif-size', type=int, nargs='+', default=[480, 270])
@@ -57,7 +77,8 @@ if __name__ == '__main__':
     # model options
     parser.add_argument('--data', type=str, default='data/coco-kp.yaml')
     parser.add_argument('--imgsz', type=int, default=1024)
-    parser.add_argument('--weights', default='kapao_s_coco.pt')
+    parser.add_argument('--weights', default=str(FILE.parents[1] / 'weights' / 'kapao_s_coco.pt'))
+    parser.add_argument('--hand-model', default=str(FILE.parents[1] / 'models' / 'hand_landmarker.task'))
     parser.add_argument('--device', default='', help='cuda device, i.e. 0 or cpu')
     parser.add_argument('--half', action='store_true')
     parser.add_argument('--conf-thres', type=float, default=0.5, help='confidence threshold')
@@ -71,6 +92,8 @@ if __name__ == '__main__':
     parser.add_argument('--flips', type=int, nargs='+', default=[-1])
 
     args = parser.parse_args()
+    if args.frame_stride < 1:
+        parser.error('--frame-stride must be at least 1')
 
     with open(args.data) as f:
         data = yaml.safe_load(f)  # load data dict
@@ -90,7 +113,10 @@ if __name__ == '__main__':
 
     video_path = args.video_path
     if not video_path:
-        video_path = args.yt_id + '_' + TAG_RES[args.tag] + '.mp4'
+        video_name = args.yt_id + '_' + TAG_RES[args.tag] + '.mp4'
+        video_dir = FILE.parents[1] / 'media' / 'videos' / 'demo'
+        video_dir.mkdir(parents=True, exist_ok=True)
+        video_path = str(video_dir / video_name)
         url = 'https://www.youtube.com/watch?v={}'.format(args.yt_id)
 
         if not osp.isfile(video_path):
@@ -104,9 +130,12 @@ if __name__ == '__main__':
             except Exception as e:
                 print('Pytube error: {}'.format(e))
                 print('We are working on a patch for pytube...')
-                if video_path == DEMO_BACKUP[args.yt_id][1]:
+                if args.yt_id in DEMO_BACKUP and video_name == DEMO_BACKUP[args.yt_id][1]:
                     print('Fetching backup demo video from google drive')
-                    gdown.download("https://drive.google.com/uc?id={}".format(DEMO_BACKUP[args.yt_id][0]))
+                    gdown.download(
+                        "https://drive.google.com/uc?id={}".format(DEMO_BACKUP[args.yt_id][0]),
+                        output=video_path,
+                    )
                 else:
                     sys.exit()
 
@@ -121,6 +150,14 @@ if __name__ == '__main__':
 
     imgsz = check_img_size(args.imgsz, s=stride)  # check image size
     dataset = LoadImages(video_path, img_size=imgsz, stride=stride, auto=True)
+    pose_tracker = ControlPoseTracker()
+    hand_detector = None
+    hand_fusion = None
+    if args.use_hand:
+        from utils.mediapipe_hand import MediaPipeHandDetector
+
+        hand_detector = MediaPipeHandDetector(args.hand_model)
+        hand_fusion = HandKapoFusion(0, 0, 0, 0, person_box_threshold=0.001)
 
     if device.type != 'cpu':
         model(torch.zeros(1, 3, imgsz, imgsz).to(device).type_as(next(model.parameters())))  # run once
@@ -135,7 +172,7 @@ if __name__ == '__main__':
     h = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
     w = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH))
     gif_frames = []
-    out_path = '{}_{}_{}'.format(osp.splitext(video_path)[0], osp.splitext(args.weights)[0],
+    out_path = '{}_{}_{}'.format(osp.splitext(video_path)[0], Path(args.weights).stem,
                                  args.device if args.device == 'cpu' else 'gpu')
     if args.csv:
         f = open(out_path + '.csv', 'w')
@@ -145,10 +182,19 @@ if __name__ == '__main__':
     if write_video:
         writer = cv2.VideoWriter(out_path + '.mp4',
                                  cv2.VideoWriter_fourcc(*'mp4v'), fps, (w, h))
+        print("Writer opened:", writer.isOpened())
+        print("Output file:", out_path + ".mp4")
 
-    dataset = tqdm(dataset, desc='Running inference', total=n)
+    inference_frames = (n + args.frame_stride - 1) // args.frame_stride
+    dataset = tqdm(dataset, desc='Reading video / running inference', total=n)
+    print("Video frames =", n, "| inference stride =", args.frame_stride,
+          "| processed frames =", inference_frames)
     t0 = time_sync()
     for i, (path, img, im0, _) in enumerate(dataset):
+        if i >= n:
+            break
+        if i % args.frame_stride:
+            continue
         img = torch.from_numpy(img).to(device)
         img = img.half() if half else img.float()  # uint8 to fp16/32
         img = img / 255.0  # 0 - 255 to 0.0 - 1.0
@@ -158,6 +204,14 @@ if __name__ == '__main__':
         out = model(img, augment=True, kp_flip=data['kp_flip'], scales=data['scales'], flips=data['flips'])[0]
         person_dets, kp_dets = run_nms(data, out)
         bboxes, poses, _, _, _ = post_process_batch(data, img, [], [[im0.shape[:2]]], person_dets, kp_dets)
+        poses = pose_tracker.update(bboxes, poses)
+
+        hand_results = hand_detector.detect(im0) if hand_detector is not None else []
+        if hand_fusion is not None:
+            hand_fusion.source_width = hand_fusion.target_width = im0.shape[1]
+            hand_fusion.source_height = hand_fusion.target_height = im0.shape[0]
+            person_boxes = [tuple(map(int, box)) for box in bboxes]
+            hand_results = hand_fusion.associate_hands_with_arms(hand_results, person_boxes, poses)
 
         # im0[433:455, 626:816] = np.mean(im0[434:454, 626:816], axis=(0, 1))  # remove patch
         im0_copy = im0.copy()
@@ -166,19 +220,70 @@ if __name__ == '__main__':
         csv_row = []
         for j, (bbox, pose) in enumerate(zip(bboxes, poses)):
             x1, y1, x2, y2 = bbox
-            cv2.rectangle(im0_copy, (int(x1), int(y1)), (int(x2), int(y2)), args.color, thickness=1)
+            if args.show_person_boxes:
+                cv2.rectangle(im0_copy, (int(x1), int(y1)), (int(x2), int(y2)), args.color, thickness=1)
             if args.csv:
-                for x, y, c in pose:
+                csv_indices = range(len(pose)) if args.full_pose else CONTROL_BODY_POINTS
+                for x, y, c in pose[list(csv_indices)]:
                     csv_row.extend([x, y, c])
             if args.face:
                 for x, y, c in pose[data['kp_face']]:
                     if not args.kp_obj or c:
                         cv2.circle(im0_copy, (int(x), int(y)), args.kp_size, args.color, args.kp_thick)
-            for seg in data['segments'].values():
-                if not args.kp_obj or (pose[seg[0], -1] and pose[seg[1], -1]):
-                    pt1 = (int(pose[seg[0], 0]), int(pose[seg[0], 1]))
-                    pt2 = (int(pose[seg[1], 0]), int(pose[seg[1], 1]))
-                    cv2.line(im0_copy, pt1, pt2, args.color, args.line_thick)
+            if args.full_pose:
+                segments = ((segment, args.color) for segment in data['segments'].values())
+                body_point_indices = range(len(pose))
+            else:
+                segments = (((first, second), color) for first, second, color in (
+                    (5, 7, LEFT_COLOR), (7, 9, LEFT_COLOR),
+                    (6, 8, RIGHT_COLOR), (8, 10, RIGHT_COLOR),
+                ))
+                body_point_indices = CONTROL_BODY_POINTS
+            for (first, second), color in segments:
+                if not args.kp_obj or (pose[first, -1] and pose[second, -1]):
+                    pt1 = (int(pose[first, 0]), int(pose[first, 1]))
+                    pt2 = (int(pose[second, 0]), int(pose[second, 1]))
+                    cv2.line(im0_copy, pt1, pt2, color, args.line_thick)
+            for point_index in body_point_indices:
+                x, y, confidence = pose[point_index]
+                if confidence:
+                    color = (LEFT_COLOR if point_index in LEFT_BODY_POINTS else
+                             RIGHT_COLOR if point_index in RIGHT_BODY_POINTS else args.color)
+                    cv2.circle(im0_copy, (int(x), int(y)), args.kp_size + 1, color, -1)
+                    if not args.full_pose:
+                        cv2.putText(im0_copy, BODY_POINT_LABELS[point_index], (int(x) + 3, int(y) - 3),
+                                    cv2.FONT_HERSHEY_SIMPLEX, 0.4, color, 1)
+
+        hand_points = range(21) if args.full_hand else CONTROL_HAND_POINTS
+        hand_connections = (
+            ((0, 1), (1, 2), (2, 3), (3, 4), (0, 5), (5, 6), (6, 7), (7, 8),
+             (5, 9), (9, 10), (10, 11), (11, 12), (9, 13), (13, 14), (14, 15),
+             (15, 16), (13, 17), (17, 18), (18, 19), (19, 20), (0, 17))
+            if args.full_hand else CONTROL_HAND_CONNECTIONS
+        )
+        for hand in hand_results:
+            color = (0, 220, 0) if hand.is_left else (255, 0, 255)
+            x1 = int(max(0, hand.x - hand.width / 2))
+            y1 = int(max(0, hand.y - hand.height / 2))
+            x2 = int(min(im0.shape[1] - 1, hand.x + hand.width / 2))
+            y2 = int(min(im0.shape[0] - 1, hand.y + hand.height / 2))
+            cv2.rectangle(im0_copy, (x1, y1), (x2, y2), color, 2)
+            label = 'Left hand' if hand.is_left else 'Right hand'
+            if hand.person_index is not None:
+                label += f' | Person {hand.person_index + 1}'
+            cv2.putText(im0_copy, label, (x1, max(18, y1 - 6)),
+                        cv2.FONT_HERSHEY_SIMPLEX, 0.5, color, 2)
+            for first, second in hand_connections:
+                pt1 = tuple(np.round(hand.landmarks[first, :2]).astype(int))
+                pt2 = tuple(np.round(hand.landmarks[second, :2]).astype(int))
+                cv2.line(im0_copy, pt1, pt2, color, 2)
+            for point_index in hand_points:
+                point = hand.landmarks[point_index]
+                cv2.circle(im0_copy, tuple(np.round(point[:2]).astype(int)), 3, color, -1)
+        if hand_detector is not None:
+            linked_count = sum(hand.person_index is not None for hand in hand_results)
+            cv2.putText(im0_copy, f"Hands: {len(hand_results)} | linked: {linked_count}",
+                        (5, 50), cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 255, 255), 2)
         im0 = cv2.addWeighted(im0, args.alpha, im0_copy, 1 - args.alpha, gamma=0)
 
         if i == 0:
@@ -197,6 +302,7 @@ if __name__ == '__main__':
                             cv2.FONT_HERSHEY_SIMPLEX, args.fps_size, (255, 255, 255), thickness=2 * args.fps_size)
             gif_frames.append(gif_img)
         elif write_video:
+            print("Writing frame", i, im0.shape)
             writer.write(im0)
         else:
             cv2.imshow('', im0)
@@ -211,7 +317,10 @@ if __name__ == '__main__':
 
     cv2.destroyAllWindows()
     cap.release()
+    if hand_detector is not None:
+        hand_detector.close()
     if write_video:
+        print("Release writer")
         writer.release()
 
     if args.gif:

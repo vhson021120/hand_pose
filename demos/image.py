@@ -33,7 +33,7 @@ if __name__ == '__main__':
     # model options
     parser.add_argument('--data', type=str, default='data/coco-kp.yaml')
     parser.add_argument('--imgsz', type=int, default=1280)
-    parser.add_argument('--weights', default='kapao_l_coco.pt')
+    parser.add_argument('--weights', default=str(FILE.parents[1] / 'weights' / 'kapao_l_coco.pt'))
     parser.add_argument('--device', default='', help='cuda device, i.e. 0 or cpu')
     parser.add_argument('--conf-thres', type=float, default=0.7, help='confidence threshold')
     parser.add_argument('--iou-thres', type=float, default=0.45, help='NMS IoU threshold')
@@ -106,7 +106,7 @@ if __name__ == '__main__':
         for x1, y1, x2, y2 in bboxes:
             cv2.rectangle(im0, (int(x1), int(y1)), (int(x2), int(y2)), args.color_kp, thickness=args.line_thick)
 
-    filename = '{}_{}'.format(osp.splitext(osp.split(args.img_path)[-1])[0], osp.splitext(args.weights)[0])
+    filename = '{}_{}'.format(osp.splitext(osp.split(args.img_path)[-1])[0], Path(args.weights).stem)
     if args.bbox:
         filename += '_bbox'
     if args.pose:
@@ -118,5 +118,7 @@ if __name__ == '__main__':
     if data['use_kp_dets']:
         filename += '_kp_obj'
     filename += '.png'
-    cv2.imwrite(filename, im0)
+    print('Writing output image:', filename)
+    ok = cv2.imwrite(filename, im0)
+    print('cv2.imwrite returned:', ok)
 

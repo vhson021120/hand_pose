@@ -53,7 +53,38 @@ The inference speed is **~9.5 FPS** on our CPU, and **~60 FPS** on our TITAN Xp.
 ![alt text](./res/yBZ0Y2t0ceo_480p_kapao_s_coco_cpu.gif)<br>
 
 To display the results in real-time: <br> 
-`$ python demos/video.py --face --display`
+`$ python demos/video.py --display`
+
+The webcam overlay shows all 21 MediaPipe hand landmarks by default, along with left/right shoulders, elbows and wrists; left/right arm chains use separate colors. Use `--control-hand` to show only the wrist, thumb and index finger. MediaPipe hand side is checked against KAPAO wrist positions, duplicate person-side detections are suppressed, and brief body-control-point dropouts are bridged for up to two processed frames. The webcam window shows whether MediaPipe initialized, raw detections versus landmarks drawn, and the age of the last detection; the console logs the same diagnostics. MediaPipe is required for the default hand-enabled demos; use `--no-hand` to disable it. Use `--full-pose` or `--show-person-boxes` to expand the body overlay; `--hand-stride 1` detects on every frame and larger values reduce CPU load but reuse the last hand result between detector frames. These are inference-time display/tracking changes; retraining needs correctly labeled data and does not happen automatically.
+
+#### High-level webcam commands
+
+The webcam demo can recognize stable arm poses and emit high-level command tokens. Only one detected person is considered; commands require both shoulders and wrists to be confidently detected and the pose to remain stable for 8 frames by default. `START` is emitted when both arms are lowered, including after startup if that pose remains visible for 8 frames. Left/right refer to KAPAO's detected body-side labels; the webcam image is mirrored, so verify the labels in dry-run before mapping them to actions:
+
+- Left arm raised and right arm lowered: `LEFT`
+- Right arm raised and left arm lowered: `RIGHT`
+- Both arms raised: `STOP`
+- Both arms lowered: `START`
+
+Enable recognition in dry-run mode first; the webcam window displays the transport mode, stable-pose progress, last detected command, and gesture mapping. It explicitly labels dry-run as unsent and notes that the pose is not robot state. Dry-run only prints commands and does not send them:
+
+```powershell
+python run.py --mode webcam --commands
+```
+
+#### Direction-only Cartesian jog preview
+
+The webcam shows independent left/right arm direction previews, not joint-angle setpoints. For each arm it measures wrist movement relative to that arm's shoulder, normalized by person-box height. It averages the first 20 valid frames as the neutral pose; hold both arms still while the preview says `CALIBRATING`. Press `c` in the webcam window to recalibrate. Once ready, a wrist shift beyond the default 12% deadband displays the dominant screen direction (`SCREEN LEFT/RIGHT/UP/DOWN`); smaller changes show `HOLD`. Missing keypoints show `NO POSE`; zero or multiple people reset calibration and suspend the preview. Tune with `--jog-calibration-frames` and `--jog-deadband`.
+
+This is a dry-run visualization only: directions refer to the mirrored webcam image, are not robot-base directions, and are not sent to RobotStudio or a robot. It does not infer near/far; that requires depth information. Keep movement execution disabled until camera-to-robot mapping, workspace limits, speed limits, and independent safety behavior have been implemented and tested.
+
+To send commands to a TCP receiver hosted by a RAPID program on a RobotStudio Virtual Controller, configure its host and port:
+
+```powershell
+python run.py --mode webcam --commands --robot-host 127.0.0.1 --robot-port 5000
+```
+
+The sender opens one TCP connection for each command, sends its ASCII token followed by a newline, and waits for a newline-terminated `ACK` (or `ACK <COMMAND>`). It reports connection errors, negative replies, missing acknowledgements, and stale queued commands. The RAPID receiver must implement this protocol; enabling TCP does not itself create a receiver or move a robot. Start with dry-run and a receiver that only logs commands, and do not map these tokens to robot motion until the Virtual Controller-side checks and safety behavior are in place.
 
 To create the GIF above:<br>
 `$ python demos/video.py --face --device cpu --gif`
@@ -87,10 +118,10 @@ The plotted poses constitute keypoint objects only.
 ![alt text](./res/nrchfeybHmw_480p_kapao_l_coco_gpu.gif)<br>
 
 To display the results in real-time:<br>
-`$ python demos/video.py --yt-id nrchfeybHmw --imgsz 1024 --weights kapao_l_coco.pt --conf-thres-kp 0.01 --kp-obj --face --start 56 --end 72 --display`
+`$ python demos/video.py --yt-id nrchfeybHmw --imgsz 1024 --weights weights/kapao_l_coco.pt --conf-thres-kp 0.01 --kp-obj --face --start 56 --end 72 --display`
 
 To create the GIF above:<br>
-`$ python demos/video.py --yt-id nrchfeybHmw --imgsz 1024 --weights kapao_l_coco.pt --conf-thres-kp 0.01 --kp-obj --face --start 56 --end 72 --gif`
+`$ python demos/video.py --yt-id nrchfeybHmw --imgsz 1024 --weights weights/kapao_l_coco.pt --conf-thres-kp 0.01 --kp-obj --face --start 56 --end 72 --gif`
 
 ---
 
@@ -130,21 +161,21 @@ Download the COCO dataset:  `$ sh data/scripts/get_coco_kp.sh`
 
 ### Validation (without TTA)
 - KAPAO-S (63.0 AP): `$ python val.py --rect`
-- KAPAO-M (68.5 AP): `$ python val.py --rect --weights kapao_m_coco.pt`
-- KAPAO-L (70.6 AP): `$ python val.py --rect --weights kapao_l_coco.pt`
+- KAPAO-M (68.5 AP): `$ python val.py --rect --weights weights/kapao_m_coco.pt`
+- KAPAO-L (70.6 AP): `$ python val.py --rect --weights weights/kapao_l_coco.pt`
 
 ### Validation (with TTA)
 - KAPAO-S (64.3 AP): `$ python val.py --scales 0.8 1 1.2 --flips -1 3 -1`
-- KAPAO-M (69.6 AP): `$ python val.py --weights kapao_m_coco.pt \ `<br>
+- KAPAO-M (69.6 AP): `$ python val.py --weights weights/kapao_m_coco.pt \ `<br>
 `--scales 0.8 1 1.2 --flips -1 3 -1` 
-- KAPAO-L (71.6 AP): `$ python val.py --weights kapao_l_coco.pt \ `<br>
+- KAPAO-L (71.6 AP): `$ python val.py --weights weights/kapao_l_coco.pt \ `<br>
 `--scales 0.8 1 1.2 --flips -1 3 -1` 
 
 ### Testing
 - KAPAO-S (63.8 AP): `$ python val.py --scales 0.8 1 1.2 --flips -1 3 -1 --task test` 
-- KAPAO-M (68.8 AP): `$ python val.py --weights kapao_m_coco.pt \ `<br>
+- KAPAO-M (68.8 AP): `$ python val.py --weights weights/kapao_m_coco.pt \ `<br>
 `--scales 0.8 1 1.2 --flips -1 3 -1 --task test` 
-- KAPAO-L (70.3 AP): `$ python val.py --weights kapao_l_coco.pt \ `<br>
+- KAPAO-L (70.3 AP): `$ python val.py --weights weights/kapao_l_coco.pt \ `<br>
 `--scales 0.8 1 1.2 --flips -1 3 -1 --task test` 
 
 
@@ -199,6 +230,28 @@ python train.py \
 --workers 128
 ```
 
+### Fine-tuning on your own keypoint data
+
+KAPAO training is supervised, not reinforcement learning. It updates the model weights using labeled keypoints and evaluates checkpoints on a held-out validation split. Raw webcam frames alone do not provide a reward signal.
+
+1. Extract sampled frames and annotate the source demo clip with the interactive tool:
+
+```powershell
+python run_app/label_video.py --video media/videos/demo/yBZ0Y2t0ceo_480p.mp4 --start-sec 90 --end-sec 180 --sample-seconds 0.5
+```
+
+The default region (90-180 seconds) contains actual movement; frames are sampled twice per second. KAPAO proposes boxes and keypoints as orange drafts. Inspect them, drag misplaced points, use `,` / `.` to select a joint, `r` then click to place a missing joint, and press `e` only after accepting a person's full proposal. Use `[` / `]` to select a person, `t` to set a track ID reused across frames, `v` to mark the selected joint occluded, and `x` to mark it unknown. Press `a` to draw a missed person's box and manually enter 17 points. Toggle tags with `1` jitter, `2` misplaced point, `3` missing point, `4` left/right confusion, `5` occlusion, `6` multiple people, `7` fast motion, and `8` viewpoint deformation. `s` saves only after every draft person has been reviewed; `n` skips and `q` quits. Frames are split chronologically. COCO TXT files train KAPAO; JSON sidecars keep track IDs and issue tags.
+
+2. Start 10-epoch rounds from the existing KAPAO-S checkpoint. Training loss and per-epoch validation metrics print in the terminal; after each round a validation score is printed, a 5-second annotated video preview opens, and the script asks whether to continue. Each round initializes from the previous round's best checkpoint. Use `--no-preview` to disable the video window:
+
+```powershell
+python run_app/train_video.py --device cpu --img 640 --batch-size 2
+```
+
+The saved best checkpoint is under `runs/video_finetune/round_001/train/weights/best.pt` (later rounds have incrementing names). Compare validation results with the starting checkpoint before adopting it. Then run the webcam with `--weights` set to the selected checkpoint.
+
+This fine-tuning improves KAPAO's 17 body keypoints. The 21 hand landmarks are produced by MediaPipe and require a separately labeled hand dataset and a MediaPipe-compatible training pipeline; KAPAO fine-tuning does not train that hand model.
+
 **Note:** [DDP](https://pytorch.org/tutorials/intermediate/ddp_tutorial.html) is usually recommended but we found training was less stable for KAPAO-M/L using DDP. We are investigating this issue.
 
 ## CrowdPose Experiments
@@ -209,11 +262,11 @@ python train.py \
 
 ### Testing
 - KAPAO-S (63.8 AP): `$ python val.py --data crowdpose.yaml \ `<br>
-`--weights kapao_s_crowdpose.pt --scales 0.8 1 1.2 --flips -1 3 -1` 
+`--weights weights/kapao_s_crowdpose.pt --scales 0.8 1 1.2 --flips -1 3 -1`
 - KAPAO-M (67.1 AP): `$ python val.py --data crowdpose.yaml \ `<br>
-`--weights kapao_m_crowdpose.pt --scales 0.8 1 1.2 --flips -1 3 -1`
+`--weights weights/kapao_m_crowdpose.pt --scales 0.8 1 1.2 --flips -1 3 -1`
 - KAPAO-L (68.9 AP): `$ python val.py --data crowdpose.yaml \ `<br>
-`--weights kapao_l_crowdpose.pt --scales 0.8 1 1.2 --flips -1 3 -1`
+`--weights weights/kapao_l_crowdpose.pt --scales 0.8 1 1.2 --flips -1 3 -1`
 
 ### Training
 The following commands were used to train the KAPAO models on 4 V100s with 32GB memory each. 

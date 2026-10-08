@@ -105,7 +105,10 @@ def post_process_batch(data, imgs, paths, shapes, person_dets, kp_dets,
                     poses_mask = poses[mask]
 
                     if len(poses_mask):
-                        kpd[:, :4] = scale_coords(imgs[si].shape[1:], kpd[:, :4], shape)
+                        # avoid in-place memory overlap errors by cloning before writing
+                        kpd = kpd.clone()
+                        kpd_xy = kpd[:, :4].clone()
+                        kpd[:, :4] = scale_coords(imgs[si].shape[1:], kpd_xy, shape)
                         kpd = kpd[:, :6].cpu()
 
                         for x1, y1, x2, y2, conf, cls in kpd:
@@ -317,7 +320,7 @@ def run(data,
 def parse_opt():
     parser = argparse.ArgumentParser(prog='val.py')
     parser.add_argument('--data', type=str, default='data/coco-kp.yaml', help='dataset.yaml path')
-    parser.add_argument('--weights', default='kapao_s_coco.pt')
+    parser.add_argument('--weights', default=str(FILE.parent / 'weights' / 'kapao_s_coco.pt'))
     parser.add_argument('--batch-size', type=int, default=1, help='batch size')
     parser.add_argument('--imgsz', type=int, default=1280, help='inference size (pixels)')
     parser.add_argument('--task', default='val', help='train, val, test')

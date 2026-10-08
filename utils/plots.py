@@ -49,16 +49,20 @@ colors = Colors()  # create instance for 'from utils.plots import colors'
 
 
 def check_font(font='Arial.ttf', size=10):
-    # Return a PIL TrueType Font, downloading to ROOT dir if necessary
+    """Return a PIL TrueType Font.
+    Use the requested font if available; otherwise fall back to Pillow's default font.
+    """
     font = Path(font)
     font = font if font.exists() else (ROOT / font.name)
+
     try:
-        return ImageFont.truetype(str(font) if font.exists() else font.name, size)
-    except Exception as e:  # download if missing
-        url = "https://ultralytics.com/assets/" + font.name
-        print(f'Downloading {url} to {font}...')
-        torch.hub.download_url_to_file(url, str(font))
-        return ImageFont.truetype(str(font), size)
+        if font.exists():
+            return ImageFont.truetype(str(font), size)
+        else:
+            return ImageFont.truetype(font.name, size)
+    except Exception:
+        print(f"Warning: Font '{font.name}' not found. Using default PIL font.")
+        return ImageFont.load_default()
 
 
 class Annotator:

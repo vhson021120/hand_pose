@@ -15,8 +15,9 @@ from itertools import repeat
 from multiprocessing.pool import ThreadPool, Pool
 from pathlib import Path
 from threading import Thread
-
+import threading
 import cv2
+import platform
 import numpy as np
 import torch
 import torch.nn.functional as F
@@ -226,7 +227,7 @@ class LoadImages:  # for inference
         else:
             # Read image
             self.count += 1
-            img0 = cv2.imread(path)  # BGR
+            img0 = cv2.imdecode(np.fromfile(path, dtype=np.uint8), cv2.IMREAD_COLOR)  # BGR
             assert img0 is not None, 'Image Not Found ' + path
             print(f'image {self.count}/{self.nf} {path}: ', end='')
 
@@ -249,12 +250,59 @@ class LoadImages:  # for inference
 
 
 class LoadWebcam:  # for inference
-    def __init__(self, pipe='0', img_size=640, stride=32):
+    def __init__(self, pipe='0', img_size=640, stride=32, width=1280, height=720, preprocess=True):
         self.img_size = img_size
         self.stride = stride
+        self.preprocess = preprocess
+        self.live = pipe.isnumeric()
         self.pipe = eval(pipe) if pipe.isnumeric() else pipe
+        # Try default backend first, then fall back to DirectShow on Windows which is often more reliable
         self.cap = cv2.VideoCapture(self.pipe)  # video capture object
-        self.cap.set(cv2.CAP_PROP_BUFFERSIZE, 3)  # set buffer size
+        if not self.cap.isOpened() and platform.system() == 'Windows':
+            try:
+                self.cap = cv2.VideoCapture(self.pipe, cv2.CAP_DSHOW)
+            except Exception:
+                pass
+        if width > 0:
+            self.cap.set(cv2.CAP_PROP_FRAME_WIDTH, width)
+        if height > 0:
+            self.cap.set(cv2.CAP_PROP_FRAME_HEIGHT, height)
+        self.cap.set(cv2.CAP_PROP_BUFFERSIZE, 1)
+        if self.cap.isOpened():
+            print(f"Webcam capture: {int(self.cap.get(cv2.CAP_PROP_FRAME_WIDTH))}x"
+                  f"{int(self.cap.get(cv2.CAP_PROP_FRAME_HEIGHT))}")
+        self._frame = None
+        self._frame_id = 0
+        self._last_id = 0
+        self._stop = False
+        self._cond = threading.Condition()
+        if self.live and self.cap.isOpened():
+            # grab frames continuously so processing always sees the newest frame (no queued latency)
+            self._thread = Thread(target=self._reader, daemon=True)
+            self._thread.start()
+
+    def _reader(self):
+        while not self._stop:
+            ret_val, frame = self.cap.read()
+            with self._cond:
+                self._frame = frame if ret_val else None
+                self._frame_id += 1
+                self._cond.notify_all()
+            if not ret_val:
+                break
+
+    def _read(self):
+        if not self.live:
+            ret_val, img0 = self.cap.read()
+            return img0 if ret_val else None
+        with self._cond:
+            self._cond.wait_for(lambda: self._frame_id != self._last_id, timeout=5.0)
+            self._last_id = self._frame_id
+            return self._frame
+
+    def release(self):
+        self._stop = True
+        self.cap.release()
 
     def __iter__(self):
         self.count = -1
@@ -262,19 +310,15 @@ class LoadWebcam:  # for inference
 
     def __next__(self):
         self.count += 1
-        if cv2.waitKey(1) == ord('q'):  # q to quit
-            self.cap.release()
-            cv2.destroyAllWindows()
-            raise StopIteration
-
-        # Read frame
-        ret_val, img0 = self.cap.read()
+        img0 = self._read()
+        if img0 is None:
+            self.release()
+            raise RuntimeError(f'Camera Error {self.pipe}')
         img0 = cv2.flip(img0, 1)  # flip left-right
 
-        # Print
-        assert ret_val, f'Camera Error {self.pipe}'
         img_path = 'webcam.jpg'
-        print(f'webcam {self.count}: ', end='')
+        if not self.preprocess:
+            return img_path, None, img0, None
 
         # Padded resize
         img = letterbox(img0, self.img_size, stride=self.stride)[0]
