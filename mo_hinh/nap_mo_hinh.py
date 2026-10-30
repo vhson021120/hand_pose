@@ -4,11 +4,40 @@ Experimental modules
 """
 
 import numpy as np
+from contextlib import contextmanager
+import importlib
+import sys
+import types
 import torch
 import torch.nn as nn
 
 from mo_hinh.cac_lop_mo_hinh import Conv
 from tien_ich.tai_tai_nguyen import attempt_download
+
+
+@contextmanager
+def _legacy_checkpoint_modules():
+    """Resolve original KAPAO pickle names after the source-folder rename."""
+    missing = object()
+    targets = {'models.common': 'mo_hinh.cac_lop_mo_hinh',
+               'models.experimental': 'mo_hinh.nap_mo_hinh',
+               'models.yolo': 'mo_hinh.kien_truc_yolo'}
+    previous = {name: sys.modules.get(name, missing) for name in ('models', *targets)}
+    package = types.ModuleType('models')
+    package.__path__ = []
+    modules = {name: importlib.import_module(target) for name, target in targets.items()}
+    try:
+        sys.modules['models'] = package
+        for name, module in modules.items():
+            sys.modules[name] = module
+            setattr(package, name.split('.', 1)[1], module)
+        yield
+    finally:
+        for name, module in previous.items():
+            if module is missing:
+                sys.modules.pop(name, None)
+            else:
+                sys.modules[name] = module
 
 
 class CrossConv(nn.Module):
@@ -91,7 +120,8 @@ def attempt_load(weights, map_location=None, inplace=True, fuse=True):
     # Loads an ensemble of models weights=[a,b,c] or a single model weights=[a] or weights=a
     model = Ensemble()
     for w in weights if isinstance(weights, list) else [weights]:
-        ckpt = torch.load(attempt_download(w), map_location=map_location, weights_only=False)  # load
+        with _legacy_checkpoint_modules():
+            ckpt = torch.load(attempt_download(w), map_location=map_location, weights_only=False)
         if fuse:
             model.append(ckpt['ema' if ckpt.get('ema') else 'model'].float().fuse().eval())  # FP32 model
         else:

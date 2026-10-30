@@ -41,6 +41,7 @@ from tien_ich.uoc_luong_khoang_cach import (
     WorkingDistanceGate,
 )
 from tien_ich.dieu_khien_webcam import CaptureGestureController, classify_control_gesture
+from tien_ich.dieu_khien_xy_yumi import NativeXYController, XYControlConfig
 
 FACE_POINTS = (0, 1, 2, 3, 4)
 ARM_POINTS = (5, 6, 7, 8, 9, 10)
@@ -173,6 +174,24 @@ if __name__ == '__main__':
                         help='request a capture FPS from the driver (0 keeps the driver default)')
     parser.add_argument('--camera-fourcc', type=str, default='',
                         help='request a capture codec such as MJPG (empty keeps the driver default)')
+    parser.add_argument('--control-mode', choices=('xy-fixed', 'pose-world'), default='xy-fixed',
+                        help='xy-fixed: integrated 5 Hz XY model and YuMi joint table (default); '
+                             'pose-world: original estimated-3D preview')
+    parser.add_argument('--xy-depth-mm', type=float, default=1000.,
+                        help='imposed camera-plane Z in mm, not measured depth (default: 1000)')
+    parser.add_argument('--xy-analysis-hz', type=float, default=5.,
+                        help='maximum analysis/IK/model update rate, independent of camera capture')
+    parser.add_argument('--xy-calibration-frames', type=int, default=20,
+                        help='valid sampled neutral poses (20 samples take about 4 s at 5 Hz)')
+    parser.add_argument('--xy-median-window', type=int, default=3)
+    parser.add_argument('--xy-ema-alpha', type=float, default=.35)
+    parser.add_argument('--xy-deadband-mm', type=float, default=2.)
+    parser.add_argument('--xy-speed-mm-s', type=float, default=30.)
+    parser.add_argument('--xy-scale-m', type=float, default=.2,
+                        help='virtual XY gain per full image height without camera intrinsics')
+    parser.add_argument('--xy-focal-px', type=float, nargs=2, metavar=('FX', 'FY'),
+                        help='optional focal lengths for the displayed camera image')
+    parser.add_argument('--xy-principal-point-px', type=float, nargs=2, metavar=('CX', 'CY'))
     stabilizer_group = parser.add_mutually_exclusive_group()
     stabilizer_group.add_argument('--wrist-stabilizer', dest='wrist_stabilizer', action='store_true',
                                   help='One Euro + state machine + outlier gating for wrist 3D (default)')
@@ -285,6 +304,20 @@ if __name__ == '__main__':
                         help='let the work-zone gate run before the range scale is validated (unreliable)')
 
     args = parser.parse_args()
+    try:
+        xy_config = XYControlConfig(
+            camera_depth_m=args.xy_depth_mm / 1000., analysis_hz=args.xy_analysis_hz,
+            calibration_frames=args.xy_calibration_frames, median_window=args.xy_median_window,
+            ema_alpha=args.xy_ema_alpha, deadband_m=args.xy_deadband_mm / 1000.,
+            max_xy_speed_m_s=args.xy_speed_mm_s / 1000., planar_scale_m=args.xy_scale_m,
+            camera_focal_px=tuple(args.xy_focal_px) if args.xy_focal_px else None,
+            camera_principal_point_px=tuple(args.xy_principal_point_px) if args.xy_principal_point_px else None,
+        )
+    except ValueError as exc:
+        parser.error(f'invalid XY configuration: {exc}')
+    if args.control_mode == 'xy-fixed' and (args.mapping_config or args.mapping_log):
+        parser.error('--mapping-config/--mapping-log use --control-mode pose-world; '
+                     'the integrated XY preview does not use an external mapping')
     if not args.use_hand:
         parser.error('gesture-controlled capture requires MediaPipe hand detection; remove --no-hand')
     if args.model_stride < 0:
@@ -334,6 +367,8 @@ if __name__ == '__main__':
         )
     except (OSError, ValueError, KeyError, TypeError) as exc:
         parser.error(f'invalid --mapping-config: {exc}')
+    native_xy_controller = NativeXYController(xy_config) if args.control_mode == 'xy-fixed' else None
+    native_xy_state = None
 
     with open(args.data) as f:
         data = yaml.safe_load(f)
@@ -468,6 +503,8 @@ if __name__ == '__main__':
     def _reset_wrist_pipeline():
         _preview_reset()
         wrist_stabilizer.reset()
+        if native_xy_controller is not None:
+            native_xy_controller.reset('Hold a neutral pose for XY calibration')
 
     relative_wrist_preview.reset = _reset_wrist_pipeline
     target_mapper = RobotTargetMapper(mapping_config) if mapping_config is not None else None
@@ -498,7 +535,7 @@ if __name__ == '__main__':
     if device.type != 'cpu' and model is not None:
         model(torch.zeros(1, 3, imgsz, imgsz).to(device).type_as(next(model.parameters())))
 
-    model_stride = args.model_stride or (2 if use_kapao else 1)
+    model_stride = args.model_stride or (1 if native_xy_controller is not None else (2 if use_kapao else 1))
     cv2.namedWindow("Webcam", cv2.WINDOW_NORMAL)
     cv2.namedWindow("3D Model", cv2.WINDOW_NORMAL)
     capture_controller = CaptureGestureController()
@@ -536,6 +573,7 @@ if __name__ == '__main__':
         flow_tracker = PoseFlowTracker()
         detected_hand_count = 0
         last_hand_detection_frame = 0
+        last_hand_detection_time = None
         mapping_logger = RobotMappingCsvLogger(args.mapping_log) if args.mapping_log else None
         for i, (path, img, im0, _) in enumerate(dataset):
             t_frame_start = time_sync()
@@ -646,6 +684,7 @@ if __name__ == '__main__':
                 raw_hand_results = hand_detector.detect(im0)
                 detected_hand_count = len(raw_hand_results)
                 last_hand_detection_frame = i
+                last_hand_detection_time = frame_monotonic
                 if len(raw_hand_results) == 1:
                     gesture = classify_control_gesture(raw_hand_results[0].landmarks)
                 else:
@@ -715,7 +754,7 @@ if __name__ == '__main__':
 
             jog_states = arm_jog_preview.update(bboxes, poses) if is_capturing else arm_jog_preview.update([], [])
             target_side = mapping_config.tracked_side if mapping_config is not None else "RIGHT"
-            if world_measurement_fresh and is_capturing:
+            if args.control_mode == 'pose-world' and world_measurement_fresh and is_capturing:
                 if (
                     len(bboxes) == 1
                     and len(pose_world_landmarks) == 1
@@ -737,7 +776,8 @@ if __name__ == '__main__':
                     last_target_track_id = None
             stabilized_world_landmarks = pose_world_landmarks
             if (
-                is_capturing
+                args.control_mode == 'pose-world'
+                and is_capturing
                 and world_measurement_fresh
                 and wrist_stabilizer_config.enabled
                 and len(pose_world_landmarks) == 1
@@ -768,9 +808,21 @@ if __name__ == '__main__':
                 wrist_reports = {}
             wrist_states = (
                 relative_wrist_preview.update(stabilized_world_landmarks)
-                if is_capturing and world_measurement_fresh
+                if args.control_mode == 'pose-world' and is_capturing and world_measurement_fresh
                 else relative_wrist_preview.update([])
             )
+            if native_xy_controller is not None:
+                track_ids = tuple(pose_tracker.last_track_ids)
+                track = pose_tracker.tracks.get(track_ids[0], {}) if len(track_ids) == 1 else {}
+                native_xy_state = native_xy_controller.update(
+                    poses, bboxes, (im0.shape[1], im0.shape[0]), frame_monotonic,
+                    active=is_capturing and capture_controller.state == capture_controller.RUNNING,
+                    fresh=bool(run_detector), track_ids=track_ids,
+                    joint_misses=track.get('joint_misses', {}),
+                    hands=tuple((hand.landmarks, hand.is_left) for hand in displayed_hand_results)
+                    if last_hand_detection_time is not None
+                    and frame_monotonic - last_hand_detection_time <= xy_config.max_age_s else (),
+                )
             selected_wrist_state = next(
                 (state for state in wrist_states if state.side == target_side),
                 None,
@@ -913,6 +965,7 @@ if __name__ == '__main__':
                 hand_is_left=[hand.is_left for hand in displayed_hand_results],
                 wrist_preview=wrist_states,
                 target_preview=target_preview,
+                native_xy=native_xy_state,
             )
             t_draw = time_sync() - t_draw_start
 
@@ -942,6 +995,14 @@ if __name__ == '__main__':
             if args.show_joint_preview:
                 draw_joint_preview(im0, *jog_states)
             draw_capture_status(im0, capture_controller)
+            if native_xy_state is not None:
+                cv2.putText(
+                    im0,
+                    f'XY: {native_xy_state.status} | {native_xy_state.analysis_hz:g} Hz | '
+                    f'CAMERA Z SET {native_xy_state.camera_depth_m * 1000.:.0f} mm | SEE 3D MODEL',
+                    (12, max(24, im0.shape[0] - 16)), cv2.FONT_HERSHEY_SIMPLEX,
+                    .42, (120, 230, 200), 1, cv2.LINE_AA,
+                )
             if args.auto_work_zone and capture_controller.state == capture_controller.WAITING:
                 zone_status = (
                     'RANGE UNCALIBRATED (run --range-calibrate)' if not range_ready

@@ -1,5 +1,6 @@
 from math import ceil
 from typing import List, Optional, Sequence, Tuple
+import unicodedata
 
 import cv2
 import numpy as np
@@ -277,6 +278,184 @@ def _depth_shade(
     return tuple(int(np.clip(channel * factor, 0, 255)) for channel in color)
 
 
+def _native_value(value, name, default=None):
+    """Read preview snapshots without importing the controller into the renderer."""
+    return value.get(name, default) if isinstance(value, dict) else getattr(value, name, default)
+
+
+def _native_number(value, places=2):
+    try:
+        number = float(value)
+    except (TypeError, ValueError, OverflowError):
+        return "--"
+    return f"{number:+.{places}f}" if np.isfinite(number) else "--"
+
+
+def _native_ascii(value):
+    """OpenCV's built-in font needs an ASCII display copy of source messages."""
+    text = str(value).replace("Đ", "D").replace("đ", "d")
+    return unicodedata.normalize("NFKD", text).encode("ascii", "ignore").decode("ascii")
+
+
+def _native_xyz(value):
+    if value is None:
+        return "--, --, --"
+    try:
+        points = np.asarray(value, dtype=float)
+    except (TypeError, ValueError):
+        return "--, --, --"
+    if points.shape != (3,) or not np.isfinite(points).all():
+        return "--, --, --"
+    return ", ".join(_native_number(number * 1000., 1) for number in points)
+
+
+def _draw_native_camera_plane(canvas, snapshot, region):
+    """Front view of the imposed camera-Z plane, not measured scene depth."""
+    x1, y1, x2, y2 = region
+    cv2.rectangle(canvas, (x1, y1), (x2, y2), (58, 72, 86), 1, cv2.LINE_AA)
+    width, height = x2 - x1, y2 - y1
+    depth = float(_native_value(snapshot, "camera_depth_m", 1.))
+    center = (int(x1 + width * .44), int(y1 + height * .57))
+    scale = float(max(1., min((height - 50) / .22, width / .6)))
+
+    def project(point):
+        return int(round(center[0] + point[0] * scale)), int(round(center[1] + point[1] * scale))
+
+    # The cross is the optical axis where it meets the selected plane. The
+    # physical camera origin remains (0,0,0), outside this Z=d cross section.
+    for delta in (-.10, -.05, .0, .05, .10):
+        yy = int(round(center[1] + delta * scale))
+        if y1 + 28 < yy < y2 - 24:
+            cv2.line(canvas, (x1 + 10, yy), (x2 - 10, yy), (39, 49, 61), 1)
+    cv2.arrowedLine(canvas, (center[0] - 55, center[1]), (center[0] + 70, center[1]),
+                    (80, 190, 255), 1, cv2.LINE_AA, tipLength=.08)
+    cv2.arrowedLine(canvas, (center[0], center[1] - 55), (center[0], center[1] + 60),
+                    (100, 220, 140), 1, cv2.LINE_AA, tipLength=.08)
+    cv2.putText(canvas, "X camera", (center[0] + 74, center[1] + 4),
+                cv2.FONT_HERSHEY_SIMPLEX, .33, (80, 190, 255), 1, cv2.LINE_AA)
+    cv2.putText(canvas, "Y", (center[0] + 4, center[1] + 64),
+                cv2.FONT_HERSHEY_SIMPLEX, .33, (100, 220, 140), 1, cv2.LINE_AA)
+    cv2.putText(canvas, f"CAMERA XY PLANE | Z = {depth * 1000.:.0f} mm (SET)",
+                (x1 + 10, y1 + 20), cv2.FONT_HERSHEY_SIMPLEX, .42,
+                (220, 232, 240), 1, cv2.LINE_AA)
+
+    pose = _native_value(snapshot, "model_pose")
+    active = _native_value(snapshot, "status") == "READY"
+    historical = (112, 126, 138)
+    if pose is not None:
+        pose = np.asarray(pose)
+        if pose.ndim == 2 and pose.shape[0] >= 33 and pose.shape[1] >= 4:
+            for first, second, color in _ARM_CONNECTIONS:
+                a, b = _point(pose, first), _point(pose, second)
+                if a is not None and b is not None:
+                    cv2.line(canvas, project(a), project(b), color if active else historical, 5, cv2.LINE_AA)
+            for index, color in ((11, (210, 135, 55)), (13, (210, 135, 55)), (15, (210, 135, 55)),
+                                 (12, (185, 75, 190)), (14, (185, 75, 190)), (16, (185, 75, 190))):
+                point = _point(pose, index)
+                if point is not None:
+                    cv2.circle(canvas, project(point), 5, color if active else historical, -1, cv2.LINE_AA)
+    for hand, is_left in _native_value(snapshot, "model_hands", ()):
+        hand = np.asarray(hand)
+        if hand.ndim != 2 or hand.shape[0] < 21 or hand.shape[1] < 3:
+            continue
+        color = ((100, 210, 150) if is_left else (210, 130, 210)) if active else historical
+        for first, second in HAND_CONNECTIONS:
+            a, b = _point(hand, first), _point(hand, second)
+            if a is not None and b is not None:
+                cv2.line(canvas, project(a), project(b), color, 1, cv2.LINE_AA)
+
+    info_x = int(x1 + width * .69)
+    details = (
+        "Depth is configured, not measured.",
+        "Camera O = (0, 0, 0)",
+        f"Plane center = (0, 0, {depth * 1000.:.0f}) mm",
+        "XY motion: shoulder-center reference.",
+        "Robot Z uses its own base frame.",
+    )
+    for index, text in enumerate(details):
+        cv2.putText(canvas, text, (info_x, y1 + 47 + index * 19),
+                    cv2.FONT_HERSHEY_SIMPLEX, .32, (160, 181, 195), 1, cv2.LINE_AA)
+    cv2.putText(canvas, "Filtered model updates only at the analysis tick; camera capture continues.",
+                (x1 + 10, y2 - 9), cv2.FONT_HERSHEY_SIMPLEX, .33,
+                (145, 169, 185), 1, cv2.LINE_AA)
+
+
+def _draw_native_arm_table(canvas, arm, region):
+    x1, y1, x2, y2 = region
+    width = x2 - x1
+    cv2.rectangle(canvas, (x1, y1), (x2, y2), (62, 77, 90), 1, cv2.LINE_AA)
+    side = str(_native_value(arm, "side", "UNKNOWN"))
+    status = str(_native_value(arm, "status", "WAITING"))
+    ready = status == "READY"
+    color = (130, 225, 175) if ready else (155, 170, 183)
+    cv2.putText(canvas, f"{side} YUMI ARM | {status}", (x1 + 10, y1 + 22),
+                cv2.FONT_HERSHEY_SIMPLEX, .48, color, 1, cv2.LINE_AA)
+    cv2.putText(canvas, "Camera XYZ mm: " + _native_xyz(_native_value(arm, "camera_position_m")),
+                (x1 + 10, y1 + 43), cv2.FONT_HERSHEY_SIMPLEX, .34,
+                color, 1, cv2.LINE_AA)
+    cv2.putText(canvas, "Robot XYZ mm:  " + _native_xyz(_native_value(arm, "robot_position_m")),
+                (x1 + 10, y1 + 61), cv2.FONT_HERSHEY_SIMPLEX, .34,
+                color, 1, cv2.LINE_AA)
+    reason = _native_value(arm, "reason") or _native_value(arm, "filter_state") or "Waiting for a valid sample"
+    samples = _native_value(arm, "calibration_frames", 0)
+    required = _native_value(arm, "required", 20)
+    if status == "CALIBRATING":
+        reason = f"Hold neutral pose: {samples}/{required} samples"
+    # Keep long input-quality explanations inside the arm's panel.
+    reason = _native_ascii(reason)
+    maximum = max(24, int((width - 20) / 6.5))
+    if len(reason) > maximum:
+        reason = reason[:maximum - 3] + "..."
+    cv2.putText(canvas, reason, (x1 + 10, y1 + 81),
+                cv2.FONT_HERSHEY_SIMPLEX, .33, (180, 187, 168), 1, cv2.LINE_AA)
+    column_x = [x1 + int(width * fraction) for fraction in (.025, .20, .45, .70)]
+    for x, label in zip(column_x, ("Axis", "Angle deg", "Speed deg/s", "+200ms deg")):
+        cv2.putText(canvas, label, (x, y1 + 108), cv2.FONT_HERSHEY_SIMPLEX,
+                    .34, (165, 185, 201), 1, cv2.LINE_AA)
+    cv2.line(canvas, (x1 + 8, y1 + 116), (x2 - 8, y1 + 116), (55, 71, 84), 1)
+    rows = {int(_native_value(row, "axis")): row for row in _native_value(arm, "rows", ())
+            if _native_value(row, "axis") in range(1, 8)}
+    row_step = max(12, min(25, int((y2 - y1 - 153) / 7)))
+    for index, axis in enumerate(range(1, 8)):
+        row = rows.get(axis)
+        y = y1 + 136 + index * row_step
+        values = (f"J{axis}", _native_number(_native_value(row, "angle_deg")),
+                  _native_number(_native_value(row, "velocity_deg_s")) if ready else "--",
+                  _native_number(_native_value(row, "predicted_deg")) if ready else "--")
+        for x, text in zip(column_x, values):
+            cv2.putText(canvas, text, (x, y), cv2.FONT_HERSHEY_SIMPLEX,
+                        .42, color, 1, cv2.LINE_AA)
+    cv2.putText(canvas, "Computed IK only | robot-base flange, no tool TCP",
+                (x1 + 10, y2 - 10), cv2.FONT_HERSHEY_SIMPLEX, .31,
+                (130, 153, 170), 1, cv2.LINE_AA)
+
+
+def _render_native_xy_canvas(snapshot, width, height):
+    canvas = np.full((height, width, 3), (24, 29, 36), dtype=np.uint8)
+    hz = _native_value(snapshot, "analysis_hz", 5.)
+    cv2.putText(canvas, "YUMI XY | FIXED CAMERA DEPTH | INTEGRATED PREVIEW",
+                (16, 28), cv2.FONT_HERSHEY_SIMPLEX, .60,
+                (232, 242, 247), 1, cv2.LINE_AA)
+    status = str(_native_value(snapshot, "status", "WAITING"))
+    cv2.putText(canvas, f"Analysis {float(hz):g} Hz | {status} | Median + EMA + deadband + speed limit",
+                (16, 51), cv2.FONT_HERSHEY_SIMPLEX, .40,
+                (135, 197, 207), 1, cv2.LINE_AA)
+    split_y = max(190, int(height * .43))
+    _draw_native_camera_plane(canvas, snapshot, (12, 65, width - 12, split_y))
+    arms = {str(_native_value(arm, "side", "")).upper(): arm
+            for arm in _native_value(snapshot, "arms", ())}
+    half = width // 2
+    for index, side in enumerate(("LEFT", "RIGHT")):
+        arm = arms.get(side, {"side": side, "status": "WAITING"})
+        _draw_native_arm_table(canvas, arm,
+                               (12 + index * half, split_y + 12,
+                                half - 6 + index * half, height - 28))
+    cv2.putText(canvas, "PREVIEW ONLY | NO ROBOT COMMANDS | Forecast is from the latest accepted sample",
+                (16, height - 8), cv2.FONT_HERSHEY_SIMPLEX, .35,
+                (80, 190, 255), 1, cv2.LINE_AA)
+    return canvas
+
+
 def render_relative_3d_canvas(
     pose_world_landmarks: Sequence[np.ndarray],
     hand_world_landmarks: Sequence[Optional[np.ndarray]],
@@ -286,8 +465,11 @@ def render_relative_3d_canvas(
     width: int = 1000,
     height: int = 720,
     target_preview: Optional[RobotTargetPreview] = None,
+    native_xy=None,
 ) -> np.ndarray:
     """Render a stable-scale arm model and midpoint-of-shoulders wrist preview."""
+    if native_xy is not None:
+        return _render_native_xy_canvas(native_xy, width, height)
     canvas = np.full((height, width, 3), (24, 29, 36), dtype=np.uint8)
     cv2.putText(canvas, "MEDIAPIPE 3D | SHOULDERS - ARMS - HANDS - FACE",
                 (16, 29), cv2.FONT_HERSHEY_SIMPLEX, 0.68, (240, 240, 240), 1, cv2.LINE_AA)
