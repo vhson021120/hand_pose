@@ -3,7 +3,7 @@
 # base ----------------------------------------
 matplotlib>=3.2.2
 numpy>=1.18.5
-opencv-python>=4.1.2
+opencv-contrib-python>=4.1.2
 Pillow>=8.0.0
 PyYAML>=5.3.1
 scipy>=1.4.1
@@ -11,10 +11,6 @@ torch>=2.0
 torchvision
 tqdm>=4.41.0
 gdown>=4.2.0
-
-# logging -------------------------------------
-tensorboard>=2.4.1
-# wandb
 
 # plotting ------------------------------------
 seaborn>=0.11.0
@@ -31,9 +27,6 @@ Cython  # for pycocotools https://github.com/cocodataset/cocoapi/issues/172
 pycocotools>=2.0.2  # COCO mAP
 # albumentations>=1.0.3
 thop  # FLOPs computation
-
-# inference demos
-pytubefix  # patched pytube
 
 # MediaPipe hand detection
 mediapipe>=0.10.14

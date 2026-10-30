@@ -1,358 +1,136 @@
-# KAPAO (Keypoints and Poses as Objects)
+# Hand Pose Webcam
 
-[Accepted to ECCV 2022](https://arxiv.org/abs/2111.08557)
+Ứng dụng webcam dùng MediaPipe để phát hiện người, cánh tay và bàn tay, hiển thị hình ảnh camera cùng mô phỏng 3D ở hai cửa sổ riêng. Mã phát hiện KAPAO vẫn được giữ làm detector tùy chọn.
 
-KAPAO is an efficient single-stage multi-person human pose estimation method that models 
-**k**eypoints **a**nd **p**oses **a**s **o**bjects within a dense anchor-based detection framework.
-KAPAO simultaneously detects _pose objects_ and _keypoint objects_ and fuses the detections to predict human poses:
+## Chạy
 
-![alt text](./res/kapao_inference.gif)
-
-When not using test-time augmentation (TTA), KAPAO is much faster and more accurate than 
-previous single-stage methods like 
-[DEKR](https://github.com/HRNet/DEKR), 
-[HigherHRNet](https://github.com/HRNet/HigherHRNet-Human-Pose-Estimation),
-[HigherHRNet + SWAHR](https://github.com/greatlog/SWAHR-HumanPose), and
-[CenterGroup](https://github.com/dvl-tum/center-group):
-
-![alt text](./res/accuracy_latency.png)
-
-This repository contains the official PyTorch implementation for the paper: <br>
-Rethinking Keypoint Representations: Modeling Keypoints and Poses as Objects for Multi-Person Human Pose Estimation.
-
-Our code was forked from ultralytics/yolov5 at commit [5487451](https://github.com/ultralytics/yolov5/tree/5487451).
-
-### Setup
-1. If you haven't already, [install Anaconda or Miniconda](https://docs.conda.io/projects/conda/en/latest/user-guide/install/index.html).
-2. Create a new conda environment with Python 3.6: `$ conda create -n kapao python=3.6`.
-3. Activate the environment: `$ conda activate kapao`
-4. Clone this repo: `$ git clone https://github.com/wmcnally/kapao.git`
-5. Install the dependencies: `$ cd kapao && pip install -r requirements.txt`
-6. Download the trained models: `$ python data/scripts/download_models.py`
-
-## Inference Demos
-
-**Note:** FPS calculations include **all processing** (i.e., including image loading, resizing, inference, plotting / tracking, etc.).
-See script arguments for inference options.
-
----
-
-#### Static Image
-
-To generate the four images in the GIF above:
-1. `$ python demos/image.py --bbox`
-2. `$ python demos/image.py --bbox --pose --face --no-kp-dets`
-3. `$ python demos/image.py --bbox --pose --face --no-kp-dets --kp-bbox`
-4. `$ python demos/image.py --pose --face`
-
-#### Shuffling Video
-KAPAO runs fastest on low resolution video with few people in the frame. This demo runs KAPAO-S on a single-person 480p dance video using an input size of 1024. 
-The inference speed is **~9.5 FPS** on our CPU, and **~60 FPS** on our TITAN Xp.
-
-**CPU inference:**<br>
-![alt text](./res/yBZ0Y2t0ceo_480p_kapao_s_coco_cpu.gif)<br>
-
-To display the results in real-time: <br> 
-`$ python demos/video.py --display`
-
-The webcam overlay shows all 21 MediaPipe hand landmarks by default, along with left/right shoulders, elbows and wrists; left/right arm chains use separate colors. Use `--control-hand` to show only the wrist, thumb and index finger. MediaPipe hand side is checked against KAPAO wrist positions, duplicate person-side detections are suppressed, and brief body-control-point dropouts are bridged for up to two processed frames. The webcam window shows whether MediaPipe initialized, raw detections versus landmarks drawn, and the age of the last detection; the console logs the same diagnostics. MediaPipe is required for the default hand-enabled demos; use `--no-hand` to disable it. Use `--full-pose` or `--show-person-boxes` to expand the body overlay; `--hand-stride 1` detects on every frame and larger values reduce CPU load but reuse the last hand result between detector frames. These are inference-time display/tracking changes; retraining needs correctly labeled data and does not happen automatically.
-
-#### High-level webcam commands
-
-The webcam demo can recognize stable arm poses and emit high-level command tokens. Only one detected person is considered; commands require both shoulders and wrists to be confidently detected and the pose to remain stable for 8 frames by default. `START` is emitted when both arms are lowered, including after startup if that pose remains visible for 8 frames. Left/right refer to KAPAO's detected body-side labels; the webcam image is mirrored, so verify the labels in dry-run before mapping them to actions:
-
-- Left arm raised and right arm lowered: `LEFT`
-- Right arm raised and left arm lowered: `RIGHT`
-- Both arms raised: `STOP`
-- Both arms lowered: `START`
-
-Enable recognition in dry-run mode first; the webcam window displays the transport mode, stable-pose progress, last detected command, and gesture mapping. It explicitly labels dry-run as unsent and notes that the pose is not robot state. Dry-run only prints commands and does not send them:
+Môi trường Python phải có các gói trong `requirements.txt` và MediaPipe. Chạy webcam mặc định:
 
 ```powershell
-python run.py --mode webcam --commands
+python run.py
 ```
 
-#### Direction-only Cartesian jog preview
-
-The webcam shows independent left/right arm direction previews, not joint-angle setpoints. For each arm it measures wrist movement relative to that arm's shoulder, normalized by person-box height. It averages the first 20 valid frames as the neutral pose; hold both arms still while the preview says `CALIBRATING`. Press `c` in the webcam window to recalibrate. Once ready, a wrist shift beyond the default 12% deadband displays the dominant screen direction (`SCREEN LEFT/RIGHT/UP/DOWN`); smaller changes show `HOLD`. Missing keypoints show `NO POSE`; zero or multiple people reset calibration and suspend the preview. Tune with `--jog-calibration-frames` and `--jog-deadband`.
-
-This is a dry-run visualization only: directions refer to the mirrored webcam image, are not robot-base directions, and are not sent to RobotStudio or a robot. It does not infer near/far; that requires depth information. Keep movement execution disabled until camera-to-robot mapping, workspace limits, speed limits, and independent safety behavior have been implemented and tested.
-
-To send commands to a TCP receiver hosted by a RAPID program on a RobotStudio Virtual Controller, configure its host and port:
+Hoặc chọn detector KAPAO:
 
 ```powershell
-python run.py --mode webcam --commands --robot-host 127.0.0.1 --robot-port 5000
+python run.py --detector kapao
 ```
 
-The sender opens one TCP connection for each command, sends its ASCII token followed by a newline, and waits for a newline-terminated `ACK` (or `ACK <COMMAND>`). It reports connection errors, negative replies, missing acknowledgements, and stale queued commands. The RAPID receiver must implement this protocol; enabling TCP does not itself create a receiver or move a robot. Start with dry-run and a receiver that only logs commands, and do not map these tokens to robot motion until the Virtual Controller-side checks and safety behavior are in place.
-
-To create the GIF above:<br>
-`$ python demos/video.py --face --device cpu --gif`
-
-**CPU specs:**<br>
-Intel Core i7-8700K<br>
-16GB DDR4 3000MHz<br>
-Samsung 970 Pro M.2 NVMe SSD<br>
-
----
-
-#### Flash Mob Video
-This demo runs KAPAO-S on a 720p flash mob video using an input size of 1280.
-
-**GPU inference:**<br>
-![alt text](./res/2DiQUX11YaY_720p_kapao_s_coco_gpu.gif)<br>
-
-To display the results in real-time: <br> 
-`$ python demos/video.py --yt-id 2DiQUX11YaY --tag 136 --imgsz 1280 --color 255 0 255 --start 188 --end 196 --display`
-
-To create the GIF above:<br>
-`$ python demos/video.py --yt-id 2DiQUX11YaY --tag 136 --imgsz 1280 --color 255 0 255 --start 188 --end 196 --gif`
-
----
-
-#### Red Light Green Light
-This demo runs KAPAO-L on a 480p clip from the TV show _Squid Game_ using an input size of 1024.
-The plotted poses constitute keypoint objects only.
-
-**GPU inference:**<br>
-![alt text](./res/nrchfeybHmw_480p_kapao_l_coco_gpu.gif)<br>
-
-To display the results in real-time:<br>
-`$ python demos/video.py --yt-id nrchfeybHmw --imgsz 1024 --weights weights/kapao_l_coco.pt --conf-thres-kp 0.01 --kp-obj --face --start 56 --end 72 --display`
-
-To create the GIF above:<br>
-`$ python demos/video.py --yt-id nrchfeybHmw --imgsz 1024 --weights weights/kapao_l_coco.pt --conf-thres-kp 0.01 --kp-obj --face --start 56 --end 72 --gif`
-
----
-
-#### Squash Video
-This demo runs KAPAO-S on a 1080p slow motion squash video. It uses a simple player tracking algorithm based on the frame-to-frame pose differences.
-
-**GPU inference:**<br>
-![alt text](./res/squash_inference_kapao_s_coco.gif)<br>
-
-To display the inference results in real-time: <br> 
-`$ python demos/squash.py --display --fps`
-
-To create the GIF above:<br>
-`$ python demos/squash.py --start 42 --end 50 --gif --fps`
-
----
-
-#### Depth Video
-Pose objects generalize well and can even be detected in depth video. 
-Here KAPAO-S was run on a depth video from a [fencing action recognition dataset](https://ieeexplore.ieee.org/abstract/document/8076041?casa_token=Zvm7dLIr1rYAAAAA:KrqtVl3NXrJZn05Eb4KGMio-18VPHc3uyDJZSiNJyI7f7oHQ5V2iwB7bK4mCJCmN83NrRl4P). 
-
-![alt text](./res/2016-01-04_21-33-35_Depth_kapao_s_coco_gpu.gif)<br>
-
-The depth video above can be downloaded directly from [here](https://drive.google.com/file/d/1n4so5WN6snyCYxeUk4xX1glADqQuitXP/view?usp=sharing).
-To create the GIF above:<br>
-`$ python demos/video.py -p 2016-01-04_21-33-35_Depth.avi --face --start 0 --end -1 --gif --gif-size 480 360`
-
----
-
-#### Web Demo
-A web demo was integrated to [Huggingface Spaces](https://huggingface.co/spaces) with [Gradio](https://github.com/gradio-app/gradio) (credit to [@AK391](https://github.com/AK391)). 
-It uses KAPAO-S to run CPU inference on short video clips.
-
-
-## COCO Experiments
-Download the COCO dataset:  `$ sh data/scripts/get_coco_kp.sh`
-
-### Validation (without TTA)
-- KAPAO-S (63.0 AP): `$ python val.py --rect`
-- KAPAO-M (68.5 AP): `$ python val.py --rect --weights weights/kapao_m_coco.pt`
-- KAPAO-L (70.6 AP): `$ python val.py --rect --weights weights/kapao_l_coco.pt`
-
-### Validation (with TTA)
-- KAPAO-S (64.3 AP): `$ python val.py --scales 0.8 1 1.2 --flips -1 3 -1`
-- KAPAO-M (69.6 AP): `$ python val.py --weights weights/kapao_m_coco.pt \ `<br>
-`--scales 0.8 1 1.2 --flips -1 3 -1` 
-- KAPAO-L (71.6 AP): `$ python val.py --weights weights/kapao_l_coco.pt \ `<br>
-`--scales 0.8 1 1.2 --flips -1 3 -1` 
-
-### Testing
-- KAPAO-S (63.8 AP): `$ python val.py --scales 0.8 1 1.2 --flips -1 3 -1 --task test` 
-- KAPAO-M (68.8 AP): `$ python val.py --weights weights/kapao_m_coco.pt \ `<br>
-`--scales 0.8 1 1.2 --flips -1 3 -1 --task test` 
-- KAPAO-L (70.3 AP): `$ python val.py --weights weights/kapao_l_coco.pt \ `<br>
-`--scales 0.8 1 1.2 --flips -1 3 -1 --task test` 
-
-
-### Training
-The following commands were used to train the KAPAO models on 4 V100s with 32GB memory each.
-
-KAPAO-S:
-```
-python -m torch.distributed.launch --nproc_per_node 4 train.py \
---img 1280 \
---batch 128 \
---epochs 500 \
---data data/coco-kp.yaml \
---hyp data/hyps/hyp.kp-p6.yaml \
---val-scales 1 \
---val-flips -1 \
---weights yolov5s6.pt \
---project runs/s_e500 \
---name train \
---workers 128
-```
-
-KAPAO-M:
-```
-python train.py \
---img 1280 \
---batch 72 \
---epochs 500 \
---data data/coco-kp.yaml \
---hyp data/hyps/hyp.kp-p6.yaml \
---val-scales 1 \
---val-flips -1 \
---weights yolov5m6.pt \
---project runs/m_e500 \
---name train \
---workers 128
-```
-
-KAPAO-L:
-```
-python train.py \
---img 1280 \
---batch 48 \
---epochs 500 \
---data data/coco-kp.yaml \
---hyp data/hyps/hyp.kp-p6.yaml \
---val-scales 1 \
---val-flips -1 \
---weights yolov5l6.pt \
---project runs/l_e500 \
---name train \
---workers 128
-```
-
-### Fine-tuning on your own keypoint data
-
-KAPAO training is supervised, not reinforcement learning. It updates the model weights using labeled keypoints and evaluates checkpoints on a held-out validation split. Raw webcam frames alone do not provide a reward signal.
-
-1. Extract sampled frames and annotate the source demo clip with the interactive tool:
+Các tham số webcam được truyền trực tiếp, ví dụ:
 
 ```powershell
-python run_app/label_video.py --video media/videos/demo/yBZ0Y2t0ceo_480p.mp4 --start-sec 90 --end-sec 180 --sample-seconds 0.5
+python run.py --help
+python run.py --camera-width 1280 --camera-height 720
 ```
 
-The default region (90-180 seconds) contains actual movement; frames are sampled twice per second. KAPAO proposes boxes and keypoints as orange drafts. Inspect them, drag misplaced points, use `,` / `.` to select a joint, `r` then click to place a missing joint, and press `e` only after accepting a person's full proposal. Use `[` / `]` to select a person, `t` to set a track ID reused across frames, `v` to mark the selected joint occluded, and `x` to mark it unknown. Press `a` to draw a missed person's box and manually enter 17 points. Toggle tags with `1` jitter, `2` misplaced point, `3` missing point, `4` left/right confusion, `5` occlusion, `6` multiple people, `7` fast motion, and `8` viewpoint deformation. `s` saves only after every draft person has been reviewed; `n` skips and `q` quits. Frames are split chronologically. COCO TXT files train KAPAO; JSON sidecars keep track IDs and issue tags.
+## Cấu trúc chương trình
 
-2. Start 10-epoch rounds from the existing KAPAO-S checkpoint. Training loss and per-epoch validation metrics print in the terminal; after each round a validation score is printed, a 5-second annotated video preview opens, and the script asks whether to continue. Each round initializes from the previous round's best checkpoint. Use `--no-preview` to disable the video window:
+- `run.py` là file khởi chạy và điều phối duy nhất: camera, nhận diện, ước lượng khoảng cách và mô hình 3D.
+- `tien_ich/` chứa các bộ lọc keypoint, nhận diện tay/tư thế, tính khoảng cách và ánh xạ tọa độ.
+- `mo_hinh/` chứa mã kiến trúc KAPAO cùng model MediaPipe; `weights/` chứa trọng số detector.
+- `danh_gia.py` cung cấp hậu xử lý cần thiết cho detector KAPAO.
+- `kiem_tra/` chứa các file kiểm tra chức năng quan trọng; chạy bằng `python -m unittest discover -s kiem_tra -p "kiem_tra_*.py" -v`.
+
+Mặc định (`--start-mode zone-thumbs-up`) chương trình chỉ bắt đầu khi đúng một người đứng ổn định trong vùng làm việc 80–120 cm (5 lần đo liên tiếp) **và** giơ thumbs-up 1 giây. Khi đang chạy, giữ **lòng bàn tay mở** 3 giây để tạm dừng; giữ **nắm tay** 0,4 giây để tiếp tục; giữ ký hiệu **V** 2 giây để kết thúc. `--start-mode zone` tự bắt đầu khi vào vùng; `--start-mode thumbs-up` bỏ qua khoảng cách. Nhấn `q` hoặc đóng một trong hai cửa sổ để thoát. Nhấn `c` để hiệu chuẩn lại tư thế trung tính cho bản xem trước cổ tay.
+
+## Keypoint và mô phỏng 3D
+
+Màn hình camera chỉ vẽ các điểm mặt tham chiếu, vai, khuỷu, cổ tay và 21 keypoint mỗi bàn tay. Bộ theo dõi làm mượt khớp điều khiển theo confidence, bỏ qua dao động nhỏ theo tỷ lệ kích thước người và dự đoán vị trí trong tối đa hai khung hình bị mất điểm; confidence của điểm dự đoán được giảm để không coi là phép đo mới. Cửa sổ 3D tập trung vào cánh tay và bàn tay; tỷ lệ hiển thị cố định theo từng ô để quan sát chuyển động. Khi bản xem trước cổ tay đã hiệu chuẩn, mô hình hiển thị thêm vector từ vị trí trung tính đến cổ tay hiện tại. MediaPipe vẫn suy luận theo landmark của model; chương trình chỉ lọc và hiển thị các điểm cần dùng.
+
+Bản xem trước cổ tay hiển thị thay đổi ΔX/ΔY/ΔZ của vector từ trung điểm hai vai đến cổ tay so với tư thế trung tính, yêu cầu đúng một người và confidence landmark đủ cao. Giá trị là **ước lượng tương đối của mô hình**, không phải tọa độ camera đã hiệu chuẩn hay tọa độ TCP robot. Chương trình không gửi bản xem trước này thành lệnh chuyển động. Webcam đơn mắt không cung cấp phép biến đổi camera–robot đã xác minh; không dùng các giá trị này để điều khiển robot.
+
+## Khoảng cách vùng làm việc
+
+Khoảng cách được đo bằng **độ rộng hai vai** trên ảnh theo mô hình camera phối cảnh: `Z_ngực = scale · fx · W_vai · cosθ / độ_rộng_vai_px`, trong đó `θ` là góc xoay thân lấy từ world landmarks (từ chối nếu > 25°). Gốc tọa độ là trung điểm hai vai. Khoảng cách cổ tay = `Z_ngực` + chênh lệch Z (world landmarks) giữa cổ tay và trung điểm vai; màn hình hiển thị khoảng cách và XYZ camera (m) của từng cổ tay. Giá trị làm mượt bằng median theo track. Không còn dùng Depth Anything vì sai số hệ thống lớn khi đo thực tế (~+0,74 m tại 0,8 m).
+
+**Bắt buộc hiệu chuẩn trước khi dùng vùng làm việc.** Chưa xác nhận hiệu chuẩn thì cổng vùng bị chặn (`RANGE UNCALIBRATED`), trừ khi thêm `--allow-uncalibrated-range` (không đáng tin). Đo bằng thước từ camera tới ngực:
+
+**Thứ tự hiệu chuẩn khuyến nghị** (đều dành cho webcam laptop, chạy lần lượt):
 
 ```powershell
-python run_app/train_video.py --device cpu --img 640 --batch-size 2
+# 1. Tiêu cự và điểm chính bằng bàn cờ in sẵn (cần >= 12 góc nhìn, sai số tái chiếu <= 1 px mới lưu)
+python run.py --focal-calibrate --chessboard-size 9 6 --chessboard-square-mm 25
+# 2. Khớp scale chiều sâu ngực (đo bằng thước)
+python run.py --range-calibrate --range-distances 0.8 1.0 1.2 --range-shoulder-width-m 0.38
+# 3. Kiểm chứng độc lập; chỉ khi đạt mới đặt confirmed = true
+python run.py --range-validate --range-distances 0.9 1.1 1.15
+# 4. Đánh giá sai số do xoay thân (đứng cùng một khoảng cách, xoay thân ~0/15/30 độ)
+python run.py --yaw-test --range-distances 1.0 --yaw-test-angles 0 15 30 --max-yaw-deg 25
+# 5. Đánh giá sai số độ sâu cổ tay (duỗi cổ tay ra trước mặt phẳng ngực 0/0,2/0,4 m, đo bằng thước)
+python run.py --wrist-validate --wrist-side RIGHT --wrist-offsets 0 0.2 0.4
 ```
 
-The saved best checkpoint is under `runs/video_finetune/round_001/train/weights/best.pt` (later rounds have incrementing names). Compare validation results with the starting checkpoint before adopting it. Then run the webcam with `--weights` set to the selected checkpoint.
+- `--focal-calibrate` lưu `fx`, `fy`, `cx`, `cy` và sai số tái chiếu vào `data/hieu_chuan_khoang_cach.json`, đồng thời **đặt lại** `scale` và trạng thái xác nhận, vì tiêu cự đã đổi. Ảnh webcam được lật gương như khi chạy ứng dụng nên thông số khớp với khung hình thực dùng. Chưa hiệu chỉnh méo ống kính.
+- `--range-calibrate` in thêm độ rộng vai ngầm định (`scale × độ rộng vai nhập`); nếu lệch nhiều so với số đo bằng thước thì kiểm tra lại độ rộng vai hoặc cách đứng.
+- `--yaw-test` in sai số có và không có hiệu chỉnh `cos(góc xoay)`, rồi lưu vào `yaw_metrics`. Khi chạy thật, thân xoay quá `--max-yaw-deg` (mặc định 25°) thì không đo.
+- `--wrist-validate` so sánh phần duỗi tay thật với `dz` của MediaPipe, in MAE/RMSE/sai số lớn nhất, hệ số `gain` (lệch tỉ lệ hệ thống) và kiểm tra dấu. Đạt khi MAE ≤ 5 cm, sai số lớn nhất ≤ 8 cm, đúng dấu. Chưa đạt thì nhãn cổ tay trên màn hình hiện `DEPTH UNVERIFIED`.
 
-This fine-tuning improves KAPAO's 17 body keypoints. The 21 hand landmarks are produced by MediaPipe and require a separately labeled hand dataset and a MediaPipe-compatible training pipeline; KAPAO fine-tuning does not train that hand model.
+Các bước này chỉ làm webcam laptop khả thi hơn để tiếp tục phát triển, **không** chứng minh phương pháp đạt độ chính xác cần cho robot thật; cổ tay đặc biệt phụ thuộc độ sâu tương đối do MediaPipe suy luận.
 
-**Note:** [DDP](https://pytorch.org/tutorials/intermediate/ddp_tutorial.html) is usually recommended but we found training was less stable for KAPAO-M/L using DDP. We are investigating this issue.
-
-## CrowdPose Experiments
-- Install the [CrowdPose API](https://github.com/Jeff-sjtu/CrowdPose/tree/master/crowdpose-api) to your conda environment: <br>
-`$ cd .. && git clone https://github.com/Jeff-sjtu/CrowdPose.git` <br>
-`$ cd CrowdPose/crowdpose-api/PythonAPI && sh install.sh && cd ../../../kapao`
-- Download the CrowdPose dataset:  `$ sh data/scripts/get_crowdpose.sh`
-
-### Testing
-- KAPAO-S (63.8 AP): `$ python val.py --data crowdpose.yaml \ `<br>
-`--weights weights/kapao_s_crowdpose.pt --scales 0.8 1 1.2 --flips -1 3 -1`
-- KAPAO-M (67.1 AP): `$ python val.py --data crowdpose.yaml \ `<br>
-`--weights weights/kapao_m_crowdpose.pt --scales 0.8 1 1.2 --flips -1 3 -1`
-- KAPAO-L (68.9 AP): `$ python val.py --data crowdpose.yaml \ `<br>
-`--weights weights/kapao_l_crowdpose.pt --scales 0.8 1 1.2 --flips -1 3 -1`
-
-### Training
-The following commands were used to train the KAPAO models on 4 V100s with 32GB memory each. 
-Training was performed on the `trainval` split with no validation. 
-The test results above were generated using the last model checkpoint.
-
-KAPAO-S:
-```
-python -m torch.distributed.launch --nproc_per_node 4 train.py \
---img 1280 \
---batch 128 \
---epochs 300 \
---data data/crowdpose.yaml \
---hyp data/hyps/hyp.kp-p6.yaml \
---val-scales 1 \
---val-flips -1 \
---weights yolov5s6.pt \
---project runs/cp_s_e300 \
---name train \
---workers 128 \
---noval
-```
-KAPAO-M:
-```
-python train.py \
---img 1280 \
---batch 72 \
---epochs 300 \
---data data/crowdpose.yaml \
---hyp data/hyps/hyp.kp-p6.yaml \
---val-scales 1 \
---val-flips -1 \
---weights yolov5m6.pt \
---project runs/cp_m_e300 \
---name train \
---workers 128 \
---noval
-```
-KAPAO-L:
-```
-python train.py \
---img 1280 \
---batch 48 \
---epochs 300 \
---data data/crowdpose.yaml \
---hyp data/hyps/hyp.kp-p6.yaml \
---val-scales 1 \
---val-flips -1 \
---weights yolov5l6.pt \
---project runs/cp_l_e300 \
---name train \
---workers 128 \
---noval
+```powershell
+python run.py --working-distance-m 1.0 --working-distance-tolerance-m 0.2
 ```
 
-## Acknowledgements
-This work was supported in part by Compute Canada, the Canada Research Chairs Program, 
-the Natural Sciences and Engineering Research Council of Canada, 
-a Microsoft Azure Grant, and an NVIDIA Hardware Grant.
+Đây là ước lượng từ một camera, phụ thuộc độ rộng vai thật, góc xoay thân và tư thế; khoảng cách cổ tay còn phụ thuộc độ sâu tương đối do MediaPipe suy luận nên kém chính xác hơn khoảng cách ngực. Không phải cảm biến an toàn và không gửi lệnh/tọa độ tới robot; chỉ dùng làm đầu vào dry-run sau khi đã kiểm chứng bằng thước.
 
-If you find this repo is helpful in your research, please cite our paper:
-```
-@article{mcnally2021kapao,
-  title={Rethinking Keypoint Representations: Modeling Keypoints and Poses as Objects for Multi-Person Human Pose Estimation},
-  author={McNally, William and Vats, Kanav and Wong, Alexander and McPhee, John},
-  journal={arXiv preprint arXiv:2111.08557},
-  year={2021}
-}
-```
-Please also consider citing our previous works:
-```
-@inproceedings{mcnally2021deepdarts,
-  title={DeepDarts: Modeling Keypoints as Objects for Automatic Scorekeeping in Darts using a Single Camera},
-  author={McNally, William and Walters, Pascale and Vats, Kanav and Wong, Alexander and McPhee, John},
-  booktitle={Proceedings of the IEEE/CVF Conference on Computer Vision and Pattern Recognition},
-  pages={4547--4556},
-  year={2021}
-}
+Gốc XYZ trong preview 3D và vector cổ tay là trung điểm 3D của hai vai MediaPipe (landmark 11 và 12). Nếu một trong hai vai thiếu hoặc confidence thấp thì vector không được xem là hợp lệ. Gốc này đi cùng người, không phải gốc sàn/camera/robot; không thay thế hiệu chuẩn camera–robot.
 
-@article{mcnally2021evopose2d,
-  title={EvoPose2D: Pushing the Boundaries of 2D Human Pose Estimation Using Accelerated Neuroevolution With Weight Transfer},
-  author={McNally, William and Vats, Kanav and Wong, Alexander and McPhee, John},
-  journal={IEEE Access},
-  volume={9},
-  pages={139403--139414},
-  year={2021},
-  publisher={IEEE}
-}
+## Phase 1 — xem trước ánh xạ tọa độ (dry-run)
+
+Có thể kiểm tra phép ánh xạ từ `delta_cm` đã trừ tư thế trung tính sang một điểm đích giả lập bằng mm trong hệ robot đã chọn. Mapper **không trừ neutral lần nữa**, không kết nối TCP và không gửi tọa độ robot. Nếu không có cấu hình hiệu chuẩn, UI báo `MAPPING NOT CONFIGURED`; không có hệ số/gốc robot mặc định.
+
+Để bật preview sau khi đã đo và xác nhận hiệu chuẩn bên ngoài chương trình, tạo một JSON riêng và chạy:
+
+```powershell
+python run.py --mapping-config C:\path\to\confirmed_mapping.json --mapping-log C:\path\to\mapping.csv
 ```
+
+JSON phải khai báo đầy đủ:
+
+- `calibration_confirmed`: boolean `true`, chỉ đặt sau khi kiểm tra hiệu chuẩn thực tế;
+- `robot_frame`: tên hệ tham chiếu robot đã xác nhận;
+- `tracked_side`: `RIGHT` hoặc `LEFT`;
+- `home_robot_mm`: tọa độ XYZ home do người vận hành xác nhận, tính bằng mm;
+- `mm_per_cm_matrix`: ma trận 3×3 đã hiệu chuẩn, đổi vectơ `delta_cm` sang offset mm. Ma trận được áp dụng cho **vectơ tịnh tiến**, không mô tả hướng TCP;
+- `max_offset_mm`: giới hạn offset tuyệt đối cho từng trục;
+- `max_speed_mm_s`, `max_sample_interval_s`, `max_delta_step_cm`, `min_confidence`: giới hạn chuyển động giả lập và chất lượng dữ liệu.
+
+Không dùng ma trận identity, home giả định hoặc chiều trục suy ra từ cửa sổ 3D làm hiệu chuẩn robot. Trước khi xác nhận cấu hình, thu ít nhất 30 frame neutral hợp lệ, kiểm tra các chuyển động theo từng trục, xác minh dấu/trục bằng dữ liệu đo và so sánh với các dịch chuyển đã đo thực tế. Độ sâu từ camera RGB đơn mắt vẫn có thể sai đáng kể.
+
+Mapper từ chối confidence thấp, mất tracking, delta NaN/Inf, bước nhảy, offset vượt giới hạn và frame cũ/`dt` không hợp lệ; các trường hợp đó không tạo target XYZ mới. Tốc độ target giả lập được giới hạn theo `max_speed_mm_s`. CSV có timestamp, landmark vai/cổ tay thô (đơn vị m), delta đã lọc (cm), offset/target (mm), frame và trạng thái. UI luôn ghi `DRY-RUN TARGET`; đây **không phải lệnh robot** và không được truyền vào bất kỳ kênh gửi nào.
+
+Việc nhận diện người hiện chỉ dùng tính liên tục của track hình học; nếu track đổi hoặc không còn đúng một người, neutral và mapping được khởi tạo lại. Đây chưa phải nhận dạng danh tính: thay người ngay tại cùng vị trí mà detector giữ nguyên track có thể không bị phát hiện. Chỉ thử với một người điều khiển duy nhất trong khung hình.
+
+## Ổn định cổ tay (`tien_ich/on_dinh_co_tay.py`)
+
+Bật mặc định; chạy giữa kết quả Pose world và `RelativeWristPreview`, nên giao diện hiệu chuẩn, ánh xạ robot và hình 3D không đổi (hình 3D vẫn vẽ landmark thô). Bộ lọc làm việc trên vector cổ tay so với trung điểm hai vai (cùng một hệ Pose world). Hand Landmarker chỉ cung cấp pixel ảnh để xác nhận cổ tay (không trộn hand world vào pose world) và tái dùng kết quả cử chỉ có sẵn, không thêm suy luận.
+
+Trạng thái: `TRACKED` (dữ liệu đi tiếp) → `UNCERTAIN` (mất/ngoại lai ngắn, mapper giữ nguyên, không reset) → `LOST` (quá `--wrist-uncertain-frames` hoặc quá 0,4 s, mapper reset) → `REACQUIRING` (cần `--wrist-reacquire-frames` mẫu liên tiếp nhất quán mới trở lại `TRACKED`). Mẫu bị loại khi: không hữu hạn, visibility thấp, cổ tay ngoài khung, cánh tay quá dài, độ dài xương lệch >35% so với tham chiếu, tốc độ > `--wrist-max-speed`.
+
+| Cờ | Mặc định | Ý nghĩa |
+|---|---|---|
+| `--no-wrist-stabilizer` | bật | hoàn nguyên hoàn toàn về đường cũ (EMA 0,35 trong preview) |
+| `--wrist-min-cutoff` | 1.5 | One Euro cutoff tối thiểu (Hz); thấp = mượt hơn, trễ hơn |
+| `--wrist-beta` | 6.0 | tăng thì giảm trễ khi tay di chuyển nhanh |
+| `--wrist-max-speed` | 6.0 | m/s, loại bước nhảy |
+| `--wrist-min-visibility` | 0.5 | ngưỡng tin cậy cổ tay/vai |
+| `--wrist-uncertain-frames` | 6 | số frame được giữ ở `UNCERTAIN` |
+| `--wrist-reacquire-frames` | 4 | số mẫu nhất quán để lấy lại |
+| `--wrist-hand-refine` | tắt | cho phép cổ tay bàn tay (pixel) gần cổ tay Pose cứu mẫu visibility 0,3–0,5 |
+| `--wrist-keep-preview-smoothing` | tắt | giữ thêm EMA cũ (lọc kép, trễ hơn) |
+| `--wrist-benchmark-csv` | — | ghi CSV từng frame; in tóm tắt jitter/dropout/độ trễ khi thoát |
+| `--camera-fps`, `--camera-fourcc` | driver | ví dụ `--camera-fourcc MJPG --camera-fps 30`; ở ánh sáng yếu driver thường tự hạ FPS |
+
+So sánh mô phỏng trước/sau: `python danh_gia_on_dinh_co_tay.py --seed 0`. Với 3 seed, so với đường cũ: RMSE ~3,1 → ~1,9 cm, ngoại lai >5 cm ~38 → 1–2 frame, trễ 67 → 33 ms. **Jitter tăng nhẹ** (~1,58 → ~1,98 cm RMS gia tốc) vì ưu tiên giảm trễ; muốn mượt hơn đặt `--wrist-min-cutoff 1.0 --wrist-beta 3` (jitter ~1,70, trễ ~67 ms). Số liệu này chỉ từ chuỗi mô phỏng, **chưa phải đo với người thật dưới ánh sáng thật**.
+
+Giới hạn còn lại: z/độ sâu cổ tay của MediaPipe vẫn là ước lượng của model; chưa tinh chỉnh bằng Hand world (khác hệ tọa độ, chưa đối chiếu được an toàn); chưa có đo thực tế về ánh sáng thay đổi; độ trễ camera/driver không được stabilizer đo; model vẫn là `lite` trong chế độ VIDEO đồng bộ (có thể thử `pose_landmarker_full.task` nhưng chậm hơn); mọi đầu ra chỉ là dry-run, không gửi lệnh tới ABB.
+
+## Mô hình và giới hạn
+
+Các model MediaPipe nằm trong `mo_hinh/`. Detector KAPAO yêu cầu weight tương ứng trong `weights/`; nếu thiếu, dùng `python data/scripts/download_models.py` để tải. Ảnh, video, dataset cục bộ và kết quả trong `runs/` không bị xóa bởi ứng dụng.
+
+`danh_gia.py` được giữ vì webcam dùng bộ giải mã/phối hợp keypoint KAPAO từ module này. Các chức năng huấn luyện, demo ảnh/video và giao diện gán nhãn riêng đã được loại khỏi launcher webcam.
+
+## Nguồn gốc KAPAO
+
+KAPAO là phương pháp ước lượng tư thế nhiều người được công bố tại ECCV 2022: [Rethinking Keypoint Representations: Modeling Keypoints and Poses as Objects for Multi-Person Human Pose Estimation](https://arxiv.org/abs/2111.08557). Mã nền được fork từ [Ultralytics YOLOv5](https://github.com/ultralytics/yolov5) tại commit `5487451`. Xem `LICENSE` để biết điều khoản sử dụng.
