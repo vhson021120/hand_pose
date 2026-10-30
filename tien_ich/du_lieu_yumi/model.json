@@ -1,0 +1,361 @@
+{
+  "robot": "ABB IRB 14000 YuMi (dual-arm)",
+  "source_repository": "https://github.com/kth-ros-pkg/yumi",
+  "source_commit": "4520af912c0ab3532225d84fed2cabe4870379bd",
+  "source_path": "yumi_description/urdf/yumi.xacro",
+  "source_sha256": "f496a8d59bfa3ba091bfdaa717b23f6f04e60ecd0f0dc0ab2eca595311f5b127",
+  "source_license": "BSD-2-Clause",
+  "base_frame": "yumi_base_link",
+  "joint_order": [
+    1,
+    2,
+    7,
+    3,
+    4,
+    5,
+    6
+  ],
+  "default_seed_deg": [
+    0,
+    -60,
+    0,
+    30,
+    0,
+    40,
+    0
+  ],
+  "arms": {
+    "left": {
+      "flange_frame": "yumi_link_7_l",
+      "joints": [
+        {
+          "name": "axis1",
+          "urdf_joint_name": "yumi_joint_1_l",
+          "xyz_m": [
+            0.05355,
+            0.0725,
+            0.41492
+          ],
+          "rpy_rad": [
+            0.9781,
+            -0.5716,
+            2.318
+          ],
+          "axis": [
+            0.0,
+            0.0,
+            1.0
+          ],
+          "limits_deg": [
+            -168.5,
+            168.5
+          ]
+        },
+        {
+          "name": "axis2",
+          "urdf_joint_name": "yumi_joint_2_l",
+          "xyz_m": [
+            0.03,
+            0.0,
+            0.1
+          ],
+          "rpy_rad": [
+            1.5707963267948966,
+            0.0,
+            0.0
+          ],
+          "axis": [
+            0.0,
+            0.0,
+            1.0
+          ],
+          "limits_deg": [
+            -143.5,
+            43.5
+          ]
+        },
+        {
+          "name": "axis7",
+          "urdf_joint_name": "yumi_joint_7_l",
+          "xyz_m": [
+            -0.03,
+            0.17283,
+            0.0
+          ],
+          "rpy_rad": [
+            -1.5707963267948966,
+            0.0,
+            0.0
+          ],
+          "axis": [
+            0.0,
+            0.0,
+            1.0
+          ],
+          "limits_deg": [
+            -168.5,
+            168.5
+          ]
+        },
+        {
+          "name": "axis3",
+          "urdf_joint_name": "yumi_joint_3_l",
+          "xyz_m": [
+            -0.04188,
+            0.0,
+            0.07873
+          ],
+          "rpy_rad": [
+            1.5707963267948966,
+            -1.5707963267948966,
+            0.0
+          ],
+          "axis": [
+            0.0,
+            0.0,
+            1.0
+          ],
+          "limits_deg": [
+            -123.5,
+            80.0
+          ]
+        },
+        {
+          "name": "axis4",
+          "urdf_joint_name": "yumi_joint_4_l",
+          "xyz_m": [
+            0.0405,
+            0.16461,
+            0.0
+          ],
+          "rpy_rad": [
+            -1.5707963267948966,
+            0.0,
+            0.0
+          ],
+          "axis": [
+            0.0,
+            0.0,
+            1.0
+          ],
+          "limits_deg": [
+            -290.0,
+            290.0
+          ]
+        },
+        {
+          "name": "axis5",
+          "urdf_joint_name": "yumi_joint_5_l",
+          "xyz_m": [
+            -0.027,
+            0.0,
+            0.10039
+          ],
+          "rpy_rad": [
+            1.5707963267948966,
+            0.0,
+            0.0
+          ],
+          "axis": [
+            0.0,
+            0.0,
+            1.0
+          ],
+          "limits_deg": [
+            -88.0,
+            138.0
+          ]
+        },
+        {
+          "name": "axis6",
+          "urdf_joint_name": "yumi_joint_6_l",
+          "xyz_m": [
+            0.027,
+            0.029,
+            0.0
+          ],
+          "rpy_rad": [
+            -1.5707963267948966,
+            0.0,
+            0.0
+          ],
+          "axis": [
+            0.0,
+            0.0,
+            1.0
+          ],
+          "limits_deg": [
+            -229.0,
+            229.0
+          ]
+        }
+      ]
+    },
+    "right": {
+      "flange_frame": "yumi_link_7_r",
+      "joints": [
+        {
+          "name": "axis1",
+          "urdf_joint_name": "yumi_joint_1_r",
+          "xyz_m": [
+            0.05355,
+            -0.0725,
+            0.41492
+          ],
+          "rpy_rad": [
+            -0.9795,
+            -0.5682,
+            -2.3155
+          ],
+          "axis": [
+            0.0,
+            0.0,
+            1.0
+          ],
+          "limits_deg": [
+            -168.5,
+            168.5
+          ]
+        },
+        {
+          "name": "axis2",
+          "urdf_joint_name": "yumi_joint_2_r",
+          "xyz_m": [
+            0.03,
+            0.0,
+            0.1
+          ],
+          "rpy_rad": [
+            1.5707963267948966,
+            0.0,
+            0.0
+          ],
+          "axis": [
+            0.0,
+            0.0,
+            1.0
+          ],
+          "limits_deg": [
+            -143.5,
+            43.5
+          ]
+        },
+        {
+          "name": "axis7",
+          "urdf_joint_name": "yumi_joint_7_r",
+          "xyz_m": [
+            -0.03,
+            0.17283,
+            0.0
+          ],
+          "rpy_rad": [
+            -1.5707963267948966,
+            0.0,
+            0.0
+          ],
+          "axis": [
+            0.0,
+            0.0,
+            1.0
+          ],
+          "limits_deg": [
+            -168.5,
+            168.5
+          ]
+        },
+        {
+          "name": "axis3",
+          "urdf_joint_name": "yumi_joint_3_r",
+          "xyz_m": [
+            -0.04188,
+            0.0,
+            0.07873
+          ],
+          "rpy_rad": [
+            1.5707963267948966,
+            -1.5707963267948966,
+            0.0
+          ],
+          "axis": [
+            0.0,
+            0.0,
+            1.0
+          ],
+          "limits_deg": [
+            -123.5,
+            80.0
+          ]
+        },
+        {
+          "name": "axis4",
+          "urdf_joint_name": "yumi_joint_4_r",
+          "xyz_m": [
+            0.0405,
+            0.16461,
+            0.0
+          ],
+          "rpy_rad": [
+            -1.5707963267948966,
+            0.0,
+            0.0
+          ],
+          "axis": [
+            0.0,
+            0.0,
+            1.0
+          ],
+          "limits_deg": [
+            -290.0,
+            290.0
+          ]
+        },
+        {
+          "name": "axis5",
+          "urdf_joint_name": "yumi_joint_5_r",
+          "xyz_m": [
+            -0.027,
+            0.0,
+            0.10039
+          ],
+          "rpy_rad": [
+            1.5707963267948966,
+            0.0,
+            0.0
+          ],
+          "axis": [
+            0.0,
+            0.0,
+            1.0
+          ],
+          "limits_deg": [
+            -88.0,
+            138.0
+          ]
+        },
+        {
+          "name": "axis6",
+          "urdf_joint_name": "yumi_joint_6_r",
+          "xyz_m": [
+            0.027,
+            0.029,
+            0.0
+          ],
+          "rpy_rad": [
+            -1.5707963267948966,
+            0.0,
+            0.0
+          ],
+          "axis": [
+            0.0,
+            0.0,
+            1.0
+          ],
+          "limits_deg": [
+            -229.0,
+            229.0
+          ]
+        }
+      ]
+    }
+  }
+}

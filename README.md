@@ -1,6 +1,33 @@
 # Hand Pose Webcam
 
-Ứng dụng webcam dùng MediaPipe để phát hiện người, cánh tay và bàn tay, hiển thị hình ảnh camera cùng mô phỏng 3D ở hai cửa sổ riêng. Mã phát hiện KAPAO vẫn được giữ làm detector tùy chọn.
+Ứng dụng webcam dùng MediaPipe để phát hiện người, cánh tay và bàn tay. Phần lấy mẫu, chống rung, mô hình XY và tính góc YuMi được tích hợp trực tiếp vào chương trình chính, chạy bằng một lệnh `python run.py`. Hai cửa sổ hiện có là `Webcam` và `3D Model`; không cần bộ trung gian, trình duyệt hay chương trình nhận dữ liệu riêng. KAPAO vẫn là detector tùy chọn.
+
+## Chế độ XY tích hợp mặc định
+
+- Mặt phẳng điều khiển có **Z camera đặt trước 1.000 mm**; đây là giả thiết cấu hình, không phải phép đo chiều sâu.
+- Camera và nhận diện tiếp tục chạy theo nhịp nguồn. Bộ tính chọn tối đa **5 mẫu keypoint mới/giây**, trước hiệu chỉnh, lọc, IK và cập nhật hình mô hình.
+- Lọc trung vị 3 mẫu, EMA 0,35, vùng giữ 2 mm và giới hạn tốc độ XY 30 mm/s. Cửa sổ 3 mẫu trải trên 400 ms ở 5 Hz; lọc làm chậm đáp ứng, nên cần thử trên webcam thật.
+- Trung điểm hai vai bù dịch thân người. Mô hình vai–khuỷu–cổ tay và bàn tay được lọc trên mặt phẳng camera; Z của các điểm điều khiển giữ cố định.
+- Cửa sổ `3D Model` hiển thị mô hình đã lọc, tọa độ camera/robot riêng biệt và hai bảng **J1–J7**, vận tốc góc, dự báo +200 ms.
+- Góc khớp được giải bằng IK của IRB 14000. Z flange trong hệ gốc robot giữ theo tư thế tham chiếu, riêng với Z camera 1.000 mm. Đây là kết quả tính toán để quan sát; chưa có TCP dụng cụ, hiệu chuẩn camera–robot hoặc đầu ra RobotStudio.
+
+Sau khi bắt đầu nhận diện, giữ tư thế trung lập trong 20 mẫu hợp lệ, khoảng 4 giây ở 5 Hz. Nhấn `c` hiệu chỉnh lại; tạm dừng giữ góc lịch sử và dừng dự báo. Tiếp tục sẽ thu lại mốc trung lập, giữ nguyên tư thế robot tính toán cuối cùng.
+
+```powershell
+python run.py
+# Các giá trị mặc định, có thể thay đổi trực tiếp:
+python run.py --xy-depth-mm 1000 --xy-analysis-hz 5 --xy-calibration-frames 20 --xy-median-window 3 --xy-ema-alpha 0.35 --xy-deadband-mm 2 --xy-speed-mm-s 30
+```
+
+Khi chưa nhập `--xy-focal-px FX FY` và `--xy-principal-point-px CX CY`, XY dùng gain quy ước `--xy-scale-m 0.2` theo chiều cao ảnh, chưa phải thang đo vật lý đã hiệu chuẩn. Thông số nội tại phải khớp kích thước, ảnh lật và biến dạng ống kính của luồng đang dùng. Đầu vào dự đoán hoặc thiếu độ tin cậy không được dùng như phép đo mới; mất dữ liệu quá 0,5 giây thì giữ giá trị lịch sử.
+
+Hình bàn tay dùng kết quả Hand Landmarker gần nhất còn trong 0,5 giây và được gắn vào cổ tay đã lọc. Nhờ đó `--hand-stride 2` không làm bàn tay bật/tắt giữa hai lần nhận diện. Các góc robot chỉ dùng phép đo vai/cổ tay mới từ detector cơ thể.
+
+Để xem lại mô hình Pose world và các công cụ ánh xạ 3D cũ:
+
+```powershell
+python run.py --control-mode pose-world
+```
 
 ## Chạy
 
@@ -25,8 +52,9 @@ python run.py --camera-width 1280 --camera-height 720
 
 ## Cấu trúc chương trình
 
-- `run.py` là file khởi chạy và điều phối duy nhất: camera, nhận diện, ước lượng khoảng cách và mô hình 3D.
+- `run.py` là file khởi chạy và điều phối duy nhất: camera, nhận diện, lấy mẫu XY, tính góc khớp và hiển thị.
 - `tien_ich/` chứa các bộ lọc keypoint, nhận diện tay/tư thế, tính khoảng cách và ánh xạ tọa độ.
+- `tien_ich/dieu_khien_xy_yumi.py` và `dong_hoc_yumi.py` là các mô-đun nội bộ, cùng dữ liệu hình học/giấy phép trong `du_lieu_yumi/`; không có launcher hay tiến trình phụ.
 - `mo_hinh/` chứa mã kiến trúc KAPAO cùng model MediaPipe; `weights/` chứa trọng số detector.
 - `danh_gia.py` cung cấp hậu xử lý cần thiết cho detector KAPAO.
 - `kiem_tra/` chứa các file kiểm tra chức năng quan trọng; chạy bằng `python -m unittest discover -s kiem_tra -p "kiem_tra_*.py" -v`.
@@ -35,15 +63,15 @@ Mặc định (`--start-mode zone-thumbs-up`) chương trình chỉ bắt đầu
 
 ## Keypoint và mô phỏng 3D
 
-Màn hình camera chỉ vẽ các điểm mặt tham chiếu, vai, khuỷu, cổ tay và 21 keypoint mỗi bàn tay. Bộ theo dõi làm mượt khớp điều khiển theo confidence, bỏ qua dao động nhỏ theo tỷ lệ kích thước người và dự đoán vị trí trong tối đa hai khung hình bị mất điểm; confidence của điểm dự đoán được giảm để không coi là phép đo mới. Cửa sổ 3D tập trung vào cánh tay và bàn tay; tỷ lệ hiển thị cố định theo từng ô để quan sát chuyển động. Khi bản xem trước cổ tay đã hiệu chuẩn, mô hình hiển thị thêm vector từ vị trí trung tính đến cổ tay hiện tại. MediaPipe vẫn suy luận theo landmark của model; chương trình chỉ lọc và hiển thị các điểm cần dùng.
+Màn hình camera vẽ các điểm mặt tham chiếu, vai, khuỷu, cổ tay và 21 keypoint mỗi bàn tay. Bộ theo dõi có thể dự đoán vị trí trong tối đa hai khung hình mất điểm, nhưng bộ tính XY loại các điểm dự đoán đó. Chế độ XY mặc định chỉ vẽ mô hình từ snapshot đã lọc ở nhịp phân tích, nên khung camera xen giữa không làm mô hình cập nhật theo nhiễu thô. Với `--control-mode pose-world`, cửa sổ trở lại bản xem trước landmark world và vector cổ tay như đường xử lý cũ.
 
-Bản xem trước cổ tay hiển thị thay đổi ΔX/ΔY/ΔZ của vector từ trung điểm hai vai đến cổ tay so với tư thế trung tính, yêu cầu đúng một người và confidence landmark đủ cao. Giá trị là **ước lượng tương đối của mô hình**, không phải tọa độ camera đã hiệu chuẩn hay tọa độ TCP robot. Chương trình không gửi bản xem trước này thành lệnh chuyển động. Webcam đơn mắt không cung cấp phép biến đổi camera–robot đã xác minh; không dùng các giá trị này để điều khiển robot.
+Bản xem trước cổ tay trong `pose-world` hiển thị thay đổi ΔX/ΔY/ΔZ của vector từ trung điểm hai vai đến cổ tay so với tư thế trung tính, yêu cầu đúng một người và confidence landmark đủ cao. Giá trị là **ước lượng tương đối của mô hình**, không phải tọa độ camera đã hiệu chuẩn hay tọa độ TCP robot. Các chế độ hiện tại đều không gửi lệnh robot.
 
 ## Khoảng cách vùng làm việc
 
 Khoảng cách được đo bằng **độ rộng hai vai** trên ảnh theo mô hình camera phối cảnh: `Z_ngực = scale · fx · W_vai · cosθ / độ_rộng_vai_px`, trong đó `θ` là góc xoay thân lấy từ world landmarks (từ chối nếu > 25°). Gốc tọa độ là trung điểm hai vai. Khoảng cách cổ tay = `Z_ngực` + chênh lệch Z (world landmarks) giữa cổ tay và trung điểm vai; màn hình hiển thị khoảng cách và XYZ camera (m) của từng cổ tay. Giá trị làm mượt bằng median theo track. Không còn dùng Depth Anything vì sai số hệ thống lớn khi đo thực tế (~+0,74 m tại 0,8 m).
 
-**Bắt buộc hiệu chuẩn trước khi dùng vùng làm việc.** Chưa xác nhận hiệu chuẩn thì cổng vùng bị chặn (`RANGE UNCALIBRATED`), trừ khi thêm `--allow-uncalibrated-range` (không đáng tin). Đo bằng thước từ camera tới ngực:
+**Cần hiệu chuẩn để dùng kiểm tra vùng làm việc có cơ sở.** Khi chưa xác nhận hiệu chuẩn, chương trình hiện thông báo và chuyển sang bắt đầu bằng thumbs-up, không kiểm tra vùng. `--allow-uncalibrated-range` cho phép dùng ước lượng chưa xác nhận. Khoảng cách vùng làm việc này độc lập với Z mặt phẳng XY đặt trước. Đo bằng thước từ camera tới ngực:
 
 **Thứ tự hiệu chuẩn khuyến nghị** (đều dành cho webcam laptop, chạy lần lượt):
 
@@ -82,7 +110,7 @@ Có thể kiểm tra phép ánh xạ từ `delta_cm` đã trừ tư thế trung 
 Để bật preview sau khi đã đo và xác nhận hiệu chuẩn bên ngoài chương trình, tạo một JSON riêng và chạy:
 
 ```powershell
-python run.py --mapping-config C:\path\to\confirmed_mapping.json --mapping-log C:\path\to\mapping.csv
+python run.py --control-mode pose-world --mapping-config C:\path\to\confirmed_mapping.json --mapping-log C:\path\to\mapping.csv
 ```
 
 JSON phải khai báo đầy đủ:
@@ -103,7 +131,7 @@ Việc nhận diện người hiện chỉ dùng tính liên tục của track h
 
 ## Ổn định cổ tay (`tien_ich/on_dinh_co_tay.py`)
 
-Bật mặc định; chạy giữa kết quả Pose world và `RelativeWristPreview`, nên giao diện hiệu chuẩn, ánh xạ robot và hình 3D không đổi (hình 3D vẫn vẽ landmark thô). Bộ lọc làm việc trên vector cổ tay so với trung điểm hai vai (cùng một hệ Pose world). Hand Landmarker chỉ cung cấp pixel ảnh để xác nhận cổ tay (không trộn hand world vào pose world) và tái dùng kết quả cử chỉ có sẵn, không thêm suy luận.
+Bật mặc định trong `--control-mode pose-world`, chạy giữa kết quả Pose world và `RelativeWristPreview`. Bộ lọc làm việc trên vector cổ tay so với trung điểm hai vai. Hand Landmarker chỉ cung cấp pixel ảnh để xác nhận cổ tay và tái dùng kết quả cử chỉ có sẵn. Chế độ XY dùng bộ lọc tích hợp riêng với các tùy chọn `--xy-*`, không chạy thêm đường lọc world này.
 
 Trạng thái: `TRACKED` (dữ liệu đi tiếp) → `UNCERTAIN` (mất/ngoại lai ngắn, mapper giữ nguyên, không reset) → `LOST` (quá `--wrist-uncertain-frames` hoặc quá 0,4 s, mapper reset) → `REACQUIRING` (cần `--wrist-reacquire-frames` mẫu liên tiếp nhất quán mới trở lại `TRACKED`). Mẫu bị loại khi: không hữu hạn, visibility thấp, cổ tay ngoài khung, cánh tay quá dài, độ dài xương lệch >35% so với tham chiếu, tốc độ > `--wrist-max-speed`.
 

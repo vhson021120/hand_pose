@@ -19,6 +19,7 @@
 *.avi
 *.data
 *.json
+!tien_ich/du_lieu_yumi/*.json
 *.cfg
 !cfg/yolov3*.cfg
 
