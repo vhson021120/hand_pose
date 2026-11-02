@@ -104,6 +104,110 @@ def draw_hand_status(
                     (180, 180, 180), 1, cv2.LINE_AA)
 
 
+def draw_wrist_xy_dashboard(
+    poses,
+    frame_shape,
+    capture_state: str,
+    tracking_active: bool,
+):
+    """Render the two COCO wrist keypoints in source-image pixel coordinates."""
+    canvas = np.full((500, 960, 3), (18, 24, 32), dtype=np.uint8)
+    frame_height, frame_width = frame_shape[:2]
+    cv2.putText(canvas, 'WRIST XY MONITOR', (26, 42),
+                cv2.FONT_HERSHEY_SIMPLEX, 0.95, (245, 248, 252), 2, cv2.LINE_AA)
+
+    if not tracking_active:
+        overall_status = capture_state
+        overall_color = (0, 190, 255)
+    elif len(poses) != 1:
+        overall_status = 'NO PERSON' if not poses else 'MULTIPLE PEOPLE'
+        overall_color = (0, 190, 255)
+    else:
+        overall_status = 'TRACKING'
+        overall_color = (100, 235, 150)
+    cv2.putText(canvas, overall_status, (735, 42),
+                cv2.FONT_HERSHEY_SIMPLEX, 0.58, overall_color, 2, cv2.LINE_AA)
+    cv2.putText(canvas, f'IMAGE SIZE  {frame_width} x {frame_height} px', (26, 76),
+                cv2.FONT_HERSHEY_SIMPLEX, 0.48, (165, 180, 198), 1, cv2.LINE_AA)
+
+    panel_y = 106
+    panel_height = 346
+    panel_width = 444
+    panel_specs = (
+        ('LEFT WRIST', 9, LEFT_COLOR),
+        ('RIGHT WRIST', 10, RIGHT_COLOR),
+    )
+    for panel_index, (label, point_index, color) in enumerate(panel_specs):
+        panel_x = 24 + panel_index * (panel_width + 24)
+        cv2.rectangle(canvas, (panel_x, panel_y),
+                      (panel_x + panel_width, panel_y + panel_height), (32, 41, 52), -1)
+        cv2.rectangle(canvas, (panel_x, panel_y),
+                      (panel_x + panel_width, panel_y + panel_height), (55, 69, 84), 1)
+        cv2.rectangle(canvas, (panel_x, panel_y),
+                      (panel_x + 5, panel_y + panel_height), color, -1)
+        cv2.putText(canvas, label, (panel_x + 20, panel_y + 34),
+                    cv2.FONT_HERSHEY_SIMPLEX, 0.62, color, 2, cv2.LINE_AA)
+
+        point = None
+        if tracking_active and len(poses) == 1:
+            pose = np.asarray(poses[0])
+            if (
+                pose.ndim == 2
+                and pose.shape[0] > point_index
+                and pose.shape[1] >= 3
+            ):
+                wrist = pose[point_index]
+                if np.isfinite(wrist[:3]).all() and wrist[2] >= 0.5:
+                    point = (int(round(float(wrist[0]))), int(round(float(wrist[1]))))
+
+        if point is None:
+            if not tracking_active:
+                point_status = capture_state
+            elif len(poses) != 1:
+                point_status = overall_status
+            else:
+                point_status = 'NOT DETECTED'
+            cv2.putText(canvas, point_status, (panel_x + 20, panel_y + 70),
+                        cv2.FONT_HERSHEY_SIMPLEX, 0.48, (165, 180, 198), 1, cv2.LINE_AA)
+            coordinate_x = coordinate_y = '--'
+        else:
+            cv2.putText(canvas, 'DETECTED', (panel_x + 20, panel_y + 70),
+                        cv2.FONT_HERSHEY_SIMPLEX, 0.48, (100, 235, 150), 1, cv2.LINE_AA)
+            coordinate_x, coordinate_y = f'{point[0]} px', f'{point[1]} px'
+
+        cv2.putText(canvas, f'X  {coordinate_x}', (panel_x + 20, panel_y + 110),
+                    cv2.FONT_HERSHEY_SIMPLEX, 0.72, (235, 240, 246), 2, cv2.LINE_AA)
+        cv2.putText(canvas, f'Y  {coordinate_y}', (panel_x + 230, panel_y + 110),
+                    cv2.FONT_HERSHEY_SIMPLEX, 0.72, (235, 240, 246), 2, cv2.LINE_AA)
+
+        plot_x, plot_y = panel_x + 20, panel_y + 132
+        plot_width, plot_height = panel_width - 40, 174
+        cv2.rectangle(canvas, (plot_x, plot_y),
+                      (plot_x + plot_width, plot_y + plot_height), (22, 29, 38), -1)
+        for fraction in (0.25, 0.5, 0.75):
+            grid_x = plot_x + int(plot_width * fraction)
+            grid_y = plot_y + int(plot_height * fraction)
+            cv2.line(canvas, (grid_x, plot_y), (grid_x, plot_y + plot_height),
+                     (48, 59, 71), 1, cv2.LINE_AA)
+            cv2.line(canvas, (plot_x, grid_y), (plot_x + plot_width, grid_y),
+                     (48, 59, 71), 1, cv2.LINE_AA)
+        cv2.rectangle(canvas, (plot_x, plot_y),
+                      (plot_x + plot_width, plot_y + plot_height), (72, 87, 102), 1)
+        cv2.putText(canvas, '(0,0)', (plot_x + 5, plot_y + 18),
+                    cv2.FONT_HERSHEY_SIMPLEX, 0.35, (130, 146, 162), 1, cv2.LINE_AA)
+        cv2.putText(canvas, 'X ->', (plot_x + plot_width - 48, plot_y + plot_height - 8),
+                    cv2.FONT_HERSHEY_SIMPLEX, 0.35, (130, 146, 162), 1, cv2.LINE_AA)
+        if point is not None and frame_width > 0 and frame_height > 0:
+            dot_x = plot_x + int(np.clip(point[0] / frame_width, 0, 1) * plot_width)
+            dot_y = plot_y + int(np.clip(point[1] / frame_height, 0, 1) * plot_height)
+            cv2.drawMarker(canvas, (dot_x, dot_y), color, cv2.MARKER_CROSS, 18, 2, cv2.LINE_AA)
+            cv2.circle(canvas, (dot_x, dot_y), 6, color, -1, cv2.LINE_AA)
+
+    cv2.putText(canvas, 'PIXEL COORDINATES | IMAGE ORIGIN (0,0) IS TOP-LEFT',
+                (26, 483), cv2.FONT_HERSHEY_SIMPLEX, 0.43, (165, 180, 198), 1, cv2.LINE_AA)
+    return canvas
+
+
 def _format_point(point: Optional[Tuple[int, int]]) -> str:
     return f'({point[0]},{point[1]})px' if point is not None else '(--,--)px'
 
@@ -1017,6 +1121,13 @@ if __name__ == '__main__':
                     f'{args.working_distance_tolerance_m:.1f}m)',
                     (12, max(24, im0.shape[0] - 42)),
                     cv2.FONT_HERSHEY_SIMPLEX,
+            wrist_xy_canvas = draw_wrist_xy_dashboard(
+                poses,
+                im0.shape,
+                capture_controller.state,
+                is_capturing or auto_waiting,
+            )
+            cv2.imshow('Wrist XY', wrist_xy_canvas)
                     0.48,
                     (0, 220, 255),
                     1,
@@ -1030,6 +1141,7 @@ if __name__ == '__main__':
                 relative_wrist_preview.reset()
                 if target_mapper is not None:
                     target_mapper.reset()
+                or cv2.getWindowProperty('Wrist XY', cv2.WND_PROP_VISIBLE) < 1
                 print('Wrist preview recalibration started; hold a neutral pose.')
             if key == ord('q'):
                 print("Webcam session ended.")

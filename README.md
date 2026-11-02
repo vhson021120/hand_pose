@@ -1,6 +1,8 @@
 # Hand Pose Webcam
 
-Ứng dụng webcam dùng MediaPipe để phát hiện người, cánh tay và bàn tay. Phần lấy mẫu, chống rung, mô hình XY và tính góc YuMi được tích hợp trực tiếp vào chương trình chính, chạy bằng một lệnh `python run.py`. Hai cửa sổ hiện có là `Webcam` và `3D Model`; không cần bộ trung gian, trình duyệt hay chương trình nhận dữ liệu riêng. KAPAO vẫn là detector tùy chọn.
+Ứng dụng webcam dùng MediaPipe để phát hiện người, cánh tay và bàn tay. Phần lấy mẫu, chống rung, mô hình XY và tính góc YuMi được tích hợp trực tiếp vào chương trình chính, chạy bằng một lệnh `python run.py`. Chương trình hiển thị ba cửa sổ: `Webcam`, `3D Model` và `Wrist XY`; không cần bộ trung gian, trình duyệt hay chương trình nhận dữ liệu riêng. KAPAO vẫn là detector tùy chọn.
+
+Cửa sổ `Wrist XY` theo dõi riêng cổ tay trái/phải, hiển thị X/Y theo pixel của ảnh camera và vị trí tương ứng trên lưới. Tọa độ ảnh có gốc `(0,0)` ở góc trên bên trái; đây không phải tọa độ robot hay khoảng cách vật lý. Cửa sổ báo trạng thái chờ/tạm dừng, mất người hoặc keypoint cổ tay không đủ tin cậy.
 
 ## Chế độ XY tích hợp mặc định
 
@@ -59,7 +61,7 @@ python run.py --camera-width 1280 --camera-height 720
 - `danh_gia.py` cung cấp hậu xử lý cần thiết cho detector KAPAO.
 - `kiem_tra/` chứa các file kiểm tra chức năng quan trọng; chạy bằng `python -m unittest discover -s kiem_tra -p "kiem_tra_*.py" -v`.
 
-Mặc định (`--start-mode zone-thumbs-up`) chương trình chỉ bắt đầu khi đúng một người đứng ổn định trong vùng làm việc 80–120 cm (5 lần đo liên tiếp) **và** giơ thumbs-up 1 giây. Khi đang chạy, giữ **lòng bàn tay mở** 3 giây để tạm dừng; giữ **nắm tay** 0,4 giây để tiếp tục; giữ ký hiệu **V** 2 giây để kết thúc. `--start-mode zone` tự bắt đầu khi vào vùng; `--start-mode thumbs-up` bỏ qua khoảng cách. Nhấn `q` hoặc đóng một trong hai cửa sổ để thoát. Nhấn `c` để hiệu chuẩn lại tư thế trung tính cho bản xem trước cổ tay.
+Mặc định (`--start-mode zone-thumbs-up`) chương trình chỉ bắt đầu khi đúng một người đứng ổn định trong vùng làm việc 80–120 cm (5 lần đo liên tiếp) **và** giơ thumbs-up 1 giây. Khi đang chạy, giữ **lòng bàn tay mở** 3 giây để tạm dừng; giữ **nắm tay** 0,4 giây để tiếp tục; giữ ký hiệu **V** 2 giây để kết thúc. `--start-mode zone` tự bắt đầu khi vào vùng; `--start-mode thumbs-up` bỏ qua khoảng cách. Nhấn `q` hoặc đóng một trong ba cửa sổ để thoát. Nhấn `c` để hiệu chuẩn lại tư thế trung tính cho bản xem trước cổ tay.
 
 ## Keypoint và mô phỏng 3D
 
