@@ -1,0 +1,14 @@
+test_valid_target_and_hold (kiem_tra_ket_noi_yumi.FormatTargetTest.test_valid_target_and_hold) ... ok
+test_center_corners_and_outside (kiem_tra_ket_noi_yumi.WorkspaceMappingTest.test_center_corners_and_outside) ... ok
+test_reconnects_after_robot_drops_connection (kiem_tra_ket_noi_yumi.YumiArmLinkTest.test_reconnects_after_robot_drops_connection) ... ok
+test_replies_with_newest_target_only (kiem_tra_ket_noi_yumi.YumiArmLinkTest.test_replies_with_newest_target_only) ... ok
+test_stale_target_becomes_hold (kiem_tra_ket_noi_yumi.YumiArmLinkTest.test_stale_target_becomes_hold) ... ok
+test_extracts_only_visible_wrist_pixels (kiem_tra_nhan_dien_co_tay.MediaPipeWristDetectorTest.test_extracts_only_visible_wrist_pixels) ... ok
+test_center_is_origin_and_screen_up_is_positive_y (kiem_tra_theo_doi_co_tay_2d.WristXYTrackerTest.test_center_is_origin_and_screen_up_is_positive_y) ... ok
+test_low_visibility_and_invalid_points_are_omitted (kiem_tra_theo_doi_co_tay_2d.WristXYTrackerTest.test_low_visibility_and_invalid_points_are_omitted) ... ok
+test_smoothing_uses_observations_and_does_not_predict_missing_points (kiem_tra_theo_doi_co_tay_2d.WristXYTrackerTest.test_smoothing_uses_observations_and_does_not_predict_missing_points) ... ok
+
+----------------------------------------------------------------------
+Ran 9 tests in 2.445s
+
+OK
