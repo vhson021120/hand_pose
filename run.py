@@ -12,7 +12,10 @@ import numpy as np
 from tien_ich.nhan_dien_ban_tay import MediaPipeHandDetector
 from tien_ich.nhan_dien_co_tay import MediaPipeWristDetector
 from tien_ich.ket_noi_yumi import YumiArmLink
-from tien_ich.theo_doi_co_tay_2d import WristXYTracker, wrist_to_workspace_mm
+from tien_ich.theo_doi_co_tay_2d import WristXYTracker, finite_values, wrist_to_workspace_mm
+from tien_ich.chan_doan_toa_do import (
+    AsyncDiagnosticLogger, draw_coordinate_diagnostics, utc_timestamp,
+)
 
 
 HAND_CONNECTIONS = (
@@ -21,6 +24,14 @@ HAND_CONNECTIONS = (
     (15, 16), (13, 17), (17, 18), (18, 19), (19, 20), (0, 17),
 )
 WRIST_SPECS = (("LEFT", 4, (70, 220, 110)), ("RIGHT", 5, (220, 90, 220)))
+
+
+def report_diagnostic_warning(message):
+    """Optional logging failures must not interrupt processing or cleanup."""
+    try:
+        print(message, file=sys.stderr)
+    except (UnicodeError, OSError, ValueError):
+        pass
 
 
 def draw_webcam_overlay(frame, wrists, hands):
@@ -48,11 +59,75 @@ def draw_webcam_overlay(frame, wrists, hands):
 
 
 def compute_workspace_roi(image_size, work_mm, fill):
-    width, height = image_size
+    size = finite_values(image_size, 2)
+    work = finite_values(work_mm, 2)
+    if size is None or work is None or min(size) <= 0 or min(work) <= 0:
+        raise ValueError("image and workspace dimensions must be finite and positive")
+    try:
+        fill = float(fill)
+    except (TypeError, ValueError, OverflowError) as exc:
+        raise ValueError("workspace fill must be in (0, 1]") from exc
+    if not np.isfinite(fill) or not 0 < fill <= 1:
+        raise ValueError("workspace fill must be in (0, 1]")
+    width, height = size
+    work_mm = work
     scale = min(width * fill / work_mm[0], height * fill / work_mm[1])
     roi_w, roi_h = work_mm[0] * scale, work_mm[1] * scale
+    if not np.isfinite((roi_w, roi_h)).all() or min(roi_w, roi_h) <= 0:
+        raise ValueError("workspace ROI must have finite positive dimensions")
     left, top = (width - roi_w) / 2.0, (height - roi_h) / 2.0
     return left, top, left + roi_w, top + roi_h
+
+
+def process_wrist_frame(tracker, detections, image_size, work_mm, fill,
+                        armed=False, swap_arms=False, frame_id=0,
+                        timestamp=None, data_source="CAMERA_UNVERIFIED"):
+    """Production coordinate path, usable offline without a camera or socket.
+
+    A target requires BOTH the raw and EMA wrist to be inside the ROI. Rows
+    describe generated targets only; send events are recorded by YumiArmLink.
+    """
+    old_size = tracker._image_size
+    wrists = tracker.update(detections, image_size=image_size)
+    resized = old_size is not None and old_size != tracker._image_size
+    roi_valid = True
+    try:
+        roi = compute_workspace_roi(image_size, work_mm, fill)
+    except (ValueError, TypeError, OverflowError, ZeroDivisionError):
+        roi_valid = False
+        roi = (0.0, 0.0, 0.0, 0.0)
+    stamp = timestamp if timestamp is not None else utc_timestamp()
+    rows = []
+    for side, _, _ in WRIST_SPECS:
+        raw = finite_values(detections.get(side), 3) if hasattr(detections, "get") else None
+        filtered = wrists.get(side)
+        raw_inside = wrist_to_workspace_mm(raw, roi, work_mm)[2] if raw else False
+        x_mm, y_mm, filtered_inside = (
+            wrist_to_workspace_mm(filtered, roi, work_mm) if filtered else (0.0, 0.0, False)
+        )
+        valid = bool(armed and raw is not None and filtered is not None
+                     and raw_inside and filtered_inside)
+        arm = "ROB_L" if side == "LEFT" else "ROB_R"
+        if swap_arms:
+            arm = "ROB_R" if arm == "ROB_L" else "ROB_L"
+        rows.append(dict(
+            timestamp=stamp, frame_id=frame_id, arm=arm, wrist=side,
+            raw_x_pixel=raw[0] if raw else "NOT_AVAILABLE",
+            raw_y_pixel=raw[1] if raw else "NOT_AVAILABLE",
+            filtered_x_pixel=filtered[0] if filtered else "NOT_AVAILABLE",
+            filtered_y_pixel=filtered[1] if filtered else "NOT_AVAILABLE",
+            x_workspace_mm=x_mm if filtered and roi_valid else "NOT_AVAILABLE",
+            y_workspace_mm=y_mm if filtered and roi_valid else "NOT_AVAILABLE",
+            raw_inside_roi=raw_inside, filtered_inside_roi=filtered_inside,
+            armed=bool(armed), target_valid=valid,
+            x_target_mm=x_mm if valid else "NOT_AVAILABLE",
+            y_target_mm=y_mm if valid else "NOT_AVAILABLE",
+            tcp_connected=False, x_sent_mm="NOT_AVAILABLE", y_sent_mm="NOT_AVAILABLE",
+            send_timestamp="NOT_AVAILABLE", sent_valid="NOT_AVAILABLE",
+            event_type="FRAME", robot_feedback="NOT_AVAILABLE",
+            data_source=data_source, frame_resized=resized,
+        ))
+    return wrists, roi, rows
 
 
 def draw_workspace_rect(frame, roi):
@@ -202,12 +277,16 @@ def main() -> int:
                         help="left wrist drives ROB_R and right wrist drives ROB_L")
     parser.add_argument("--no-robot", action="store_true",
                         help="only track, do not connect to the robot")
+    parser.add_argument("--diagnostic", action="store_true",
+                        help="show raw/filtered ROI and expected targets (not robot feedback)")
+    parser.add_argument("--diagnostic-log", metavar="CSV", default=None,
+                        help="enable asynchronous coordinate CSV logging to this path (off by default)")
     args = parser.parse_args()
 
     if args.camera_width <= 0 or args.camera_height <= 0:
         parser.error("camera dimensions must be positive")
-    if args.camera_fps < 0:
-        parser.error("camera FPS must be non-negative")
+    if not np.isfinite(args.camera_fps) or args.camera_fps < 0:
+        parser.error("camera FPS must be finite and non-negative")
     if len(args.camera_fourcc) not in (0, 4):
         parser.error("camera FOURCC must contain exactly four characters")
     for name in ("work_width_mm", "work_height_mm"):
@@ -228,10 +307,16 @@ def main() -> int:
     tracker = WristXYTracker(args.smoothing, args.wrist_visibility)
     links = None
     armed = False
+    diagnostic_logger = None
+    frame_id = 0
+    reported_log_error = None
     try:
+        if args.diagnostic_log:
+            diagnostic_logger = AsyncDiagnosticLogger(args.diagnostic_log)
+        on_send = diagnostic_logger.record if diagnostic_logger else None
         if not args.no_robot:
-            left_link = YumiArmLink("ROB_L", args.robot_ip, args.left_port).start()
-            right_link = YumiArmLink("ROB_R", args.robot_ip, args.right_port).start()
+            left_link = YumiArmLink("ROB_L", args.robot_ip, args.left_port, on_send=on_send).start()
+            right_link = YumiArmLink("ROB_R", args.robot_ip, args.right_port, on_send=on_send).start()
             if args.swap_arms:
                 links = {"LEFT": right_link, "RIGHT": left_link}
             else:
@@ -247,6 +332,8 @@ def main() -> int:
         hand_detector = MediaPipeHandDetector(args.hand_model)
         cv2.namedWindow("Webcam", cv2.WINDOW_NORMAL)
         cv2.namedWindow("Wrist XY", cv2.WINDOW_NORMAL)
+        if args.diagnostic:
+            cv2.namedWindow("Coordinate Diagnostic", cv2.WINDOW_NORMAL)
 
         while True:
             ok, frame = camera.read()
@@ -255,29 +342,41 @@ def main() -> int:
                     raise RuntimeError(f"Camera read failed for source {args.pipe}")
                 break
             frame = cv2.flip(frame, 1)
+            frame_id += 1
+            frame_timestamp = utc_timestamp()
             height, width = frame.shape[:2]
             pose_results = pose_detector.detect(frame)
             detections = pose_results[0] if len(pose_results) == 1 else {}
-            wrists = tracker.update(detections)
+            work_mm = (args.work_width_mm, args.work_height_mm)
+            wrists, roi, diagnostic_rows = process_wrist_frame(
+                tracker, detections, (width, height), work_mm, args.work_fill,
+                armed=armed, swap_arms=args.swap_arms, frame_id=frame_id,
+                timestamp=frame_timestamp,
+            )
             hands = hand_detector.detect(frame)
 
-            work_mm = (args.work_width_mm, args.work_height_mm)
-            roi = compute_workspace_roi((width, height), work_mm, args.work_fill)
             webcam_view = draw_webcam_overlay(frame, wrists, hands)
             draw_workspace_rect(webcam_view, roi)
             xy_view = draw_wrist_xy_dashboard(wrists, roi, work_mm, len(pose_results))
-            if links is not None:
-                for side, link in links.items():
-                    target = None
-                    wrist = wrists.get(side)
-                    if armed and wrist is not None:
-                        x_mm, y_mm, inside = wrist_to_workspace_mm(wrist, roi, work_mm)
-                        # Outside the workspace the arm holds instead of jumping to the edge.
-                        target = (x_mm, y_mm) if inside else None
-                    link.set_target(target)
+            for row in diagnostic_rows:
+                link = links.get(row["wrist"]) if links is not None else None
+                row["tcp_connected"] = bool(link and link.connected)
+                if link is not None:
+                    target = (row["x_target_mm"], row["y_target_mm"]) if row["target_valid"] else None
+                    link.set_target(target, context=row)
+                if diagnostic_logger:
+                    diagnostic_logger.record(row)
             draw_robot_status(xy_view, armed, links)
             cv2.imshow("Webcam", webcam_view)
             cv2.imshow("Wrist XY", xy_view)
+            log_status = "CSV OFF"
+            if diagnostic_logger:
+                log_status = f"CSV drops={diagnostic_logger.dropped_rows} error={diagnostic_logger.error or 'none'}"
+                if diagnostic_logger.error and diagnostic_logger.error != reported_log_error:
+                    reported_log_error = diagnostic_logger.error
+                    report_diagnostic_warning(f"Diagnostic logging unavailable: {reported_log_error}")
+            if args.diagnostic:
+                cv2.imshow("Coordinate Diagnostic", draw_coordinate_diagnostics(diagnostic_rows, log_status))
             key = cv2.waitKey(1) & 0xFF
             if key in (ord("q"), 27):
                 break
@@ -299,6 +398,13 @@ def main() -> int:
         if hand_detector is not None:
             hand_detector.close()
         cv2.destroyAllWindows()
+        if diagnostic_logger:
+            drained = diagnostic_logger.close()
+            if not drained or diagnostic_logger.dropped_rows or diagnostic_logger.error:
+                report_diagnostic_warning(
+                    f"Diagnostic CSV: drained={drained}, dropped={diagnostic_logger.dropped_rows}, "
+                    f"error={diagnostic_logger.error}"
+                )
     return 0
 
 

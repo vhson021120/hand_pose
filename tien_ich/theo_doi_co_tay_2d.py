@@ -18,29 +18,50 @@ class WristXYTracker:
         self.smoothing = smoothing
         self.min_visibility = min_visibility
         self._points: Dict[str, np.ndarray] = {}
+        self._image_size = None
 
     def reset(self) -> None:
         self._points.clear()
 
-    def update(self, detections: Mapping[str, Sequence[float]]) -> Dict[str, WristPoint]:
+    def update(self, detections: Mapping[str, Sequence[float]], image_size=None) -> Dict[str, WristPoint]:
+        # Pixel histories are meaningful only within the same frame dimensions.
+        if image_size is not None:
+            size = finite_values(image_size, 2)
+            if size is None or min(size) <= 0:
+                self.reset()
+                self._image_size = None
+                return {}
+            if self._image_size != size:
+                self.reset()
+                self._image_size = size
         current: Dict[str, np.ndarray] = {}
+        if not isinstance(detections, Mapping):
+            self.reset()
+            return {}
         for side in ("LEFT", "RIGHT"):
             detection = detections.get(side)
             if detection is None:
                 continue
-            point = np.asarray(detection, dtype=np.float64)
+            values = finite_values(detection, 3)
+            if values is None:
+                continue
+            point = np.asarray(values, dtype=np.float64)
             if (
                 point.shape != (3,)
                 or not np.isfinite(point).all()
                 or point[2] < self.min_visibility
+                or not 0 <= point[2] <= 1
             ):
                 continue
             previous = self._points.get(side)
-            filtered = (
-                point.copy()
-                if previous is None
-                else previous + self.smoothing * (point - previous)
-            )
+            with np.errstate(over="ignore", invalid="ignore"):
+                filtered = (
+                    point.copy()
+                    if previous is None
+                    else previous + self.smoothing * (point - previous)
+                )
+            if not np.isfinite(filtered).all():
+                continue
             current[side] = filtered
 
         self._points = current
@@ -48,6 +69,17 @@ class WristXYTracker:
             side: (float(point[0]), float(point[1]), float(point[2]))
             for side, point in current.items()
         }
+
+
+def finite_values(values, length):
+    """Return a finite flat numeric tuple, or None for malformed observations."""
+    try:
+        point = np.asarray(values, dtype=np.float64)
+    except (ValueError, TypeError, OverflowError):
+        return None
+    if point.shape != (length,) or not np.isfinite(point).all():
+        return None
+    return tuple(float(value) for value in point)
 
 
 def wrist_to_workspace_mm(
@@ -60,12 +92,26 @@ def wrist_to_workspace_mm(
     Values are clamped to the workspace edges; ``inside`` tells whether the
     point was really inside the ROI.
     """
-    x, y = float(point[0]), float(point[1])
-    left, top, right, bottom = roi
+    try:
+        coordinates = finite_values(point[:2], 2) if len(point) in (2, 3) else None
+    except (TypeError, ValueError, IndexError):
+        coordinates = None
+    bounds = finite_values(roi, 4)
+    work = finite_values(work_mm, 2)
+    if coordinates is None or bounds is None or work is None:
+        return 0.0, 0.0, False
+    x, y = coordinates
+    left, top, right, bottom = bounds
+    if right <= left or bottom <= top or min(work) <= 0:
+        return 0.0, 0.0, False
+    # Guard arithmetic overflow without changing the mapping for valid inputs.
+    if not all(math.isfinite(value) for value in
+               (right - left, bottom - top, x - left, y - top)):
+        return 0.0, 0.0, False
     u = min(max((x - left) / (right - left), 0.0), 1.0)
     v = min(max((y - top) / (bottom - top), 0.0), 1.0)
     inside = left <= x <= right and top <= y <= bottom
-    return (u - 0.5) * work_mm[0], (0.5 - v) * work_mm[1], inside
+    return (u - 0.5) * work[0], (0.5 - v) * work[1], inside
 
 
 def screen_pixel_to_centered_mm(

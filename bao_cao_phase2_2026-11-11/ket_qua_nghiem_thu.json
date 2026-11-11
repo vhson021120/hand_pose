@@ -1,0 +1,73 @@
+{
+  "results": {
+    "test_goc_9": {
+      "tests": 9,
+      "passed": 9,
+      "failed": 0,
+      "errors": 0,
+      "skipped": 0,
+      "seconds": 2.9796782999983407,
+      "success": true
+    },
+    "test_bo_sung_31": {
+      "tests": 31,
+      "passed": 31,
+      "failed": 0,
+      "errors": 0,
+      "skipped": 0,
+      "seconds": 3.5915477000016836,
+      "success": true
+    },
+    "test_phase2": {
+      "tests": 58,
+      "passed": 58,
+      "failed": 0,
+      "errors": 0,
+      "skipped": 0,
+      "seconds": 14.04819850000058,
+      "success": true
+    }
+  },
+  "environment": {
+    "python": "3.11.9 (tags/v3.11.9:de54cf5, Apr  2 2024, 10:12:12) [MSC v.1938 64 bit (AMD64)]",
+    "packages": {
+      "numpy": "2.4.6",
+      "opencv-contrib-python": "5.0.0.93",
+      "mediapipe": "1.2.2"
+    }
+  },
+  "sample_csv_valid": true,
+  "sample_csv_rows": 9,
+  "preview_png_valid": true,
+  "test_results_reused_after_hash_check": true,
+  "sample_tcp_messages": [
+    "1,59.9,0.0\n",
+    "0,0.0,0.0\n",
+    "0,0.0,0.0\n"
+  ],
+  "network_destinations": [
+    [
+      "127.0.0.1",
+      65087
+    ]
+  ],
+  "non_loopback_connections": 0,
+  "camera_access": "BLOCKED_BY_TEST_GUARD",
+  "robot_feedback": "NOT_AVAILABLE",
+  "rapid_unchanged": true,
+  "sha256_after": {
+    "run.py": "4c1c84436a4f911b60197110e8392c82c3fddd3a9589b8ce0c70968028c2eb7b",
+    "tien_ich/chan_doan_toa_do.py": "fa66e9afd780af64210fc9a8119411d2cf8e7999e6e8807e7cb34bab6b8c1e70",
+    "tien_ich/ket_noi_yumi.py": "24c118f38e417a1f7b02f1f51e87110fd557210bcd4f1bd6e43128d5fdf08186",
+    "tien_ich/nhan_dien_ban_tay.py": "640d09070859adf28f4f5ee61c08ae93e44505542f50380dc84978e179afc4c7",
+    "tien_ich/nhan_dien_co_tay.py": "2d76cdfb275f0b395f9bb36df6d6cd1c333c44faa693e1b3b45250b9d0d1c634",
+    "tien_ich/theo_doi_co_tay_2d.py": "dcf9901d31908834fe56ad6ecbd1d726f78e0006b947d0ed5953014b4e43218e",
+    "bao_cao_offline_2026-11-11/kiem_thu_bo_sung.py": "fb643ca307a187831a199b53e3e7d71f8fec418f16bf27f3f06a518584ea0c0f",
+    "kiem_tra/phase2/kiem_tra_diagnostic.py": "f7cbe32719e016d709e9ec5998b5900827787666cef923331c9d1281749f7c4e",
+    "kiem_tra/phase2/kiem_tra_main_phase2.py": "4226b45546d2be12da1cec16e430ac878d5073e1d62fe39efd2b53ee941780fa",
+    "kiem_tra/phase2/kiem_tra_pipeline.py": "60360234cce91802dd37a4a7c799e938d0ef01dc80dd7e5934626bb5c44d44d0",
+    "kiem_tra/phase2/kiem_tra_tcp_phase2.py": "c318e3276b3d2045ffe76cfd31c126f6a361bb868c9af9de584c59fc31c1fca5",
+    "kiem_tra/phase2/kiem_tra_tich_hop_xy.py": "f5af215d4ef57e62fce0d20cdf89355b36cd68b70c1429fdac7960ed2bd43100",
+    "robot/HandFollow.mod": "1d55047a1288024b937950f2e5d274ce073c06a1ad3d8e01260825a98a13b583"
+  }
+}

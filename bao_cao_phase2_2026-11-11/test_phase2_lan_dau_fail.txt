@@ -1,0 +1,76 @@
+test_missing_data_render_hold (kiem_tra_diagnostic.DiagnosticDisplayTests.test_missing_data_render_hold) ... ok
+test_render_is_optional_canvas_only_and_marks_expected_not_feedback (kiem_tra_diagnostic.DiagnosticDisplayTests.test_render_is_optional_canvas_only_and_marks_expected_not_feedback) ... ok
+test_timestamp_is_explicit_utc (kiem_tra_diagnostic.DiagnosticDisplayTests.test_timestamp_is_explicit_utc) ... ok
+test_closed_logger_and_malformed_records_do_not_raise (kiem_tra_diagnostic.DiagnosticLoggerTests.test_closed_logger_and_malformed_records_do_not_raise) ... ok
+test_frame_and_send_are_distinct_and_send_uses_supplied_payload (kiem_tra_diagnostic.DiagnosticLoggerTests.test_frame_and_send_are_distinct_and_send_uses_supplied_payload) ... ok
+test_invalid_queue_and_close_timeout_are_rejected (kiem_tra_diagnostic.DiagnosticLoggerTests.test_invalid_queue_and_close_timeout_are_rejected) ... ok
+test_record_takes_snapshot_and_nonfinite_values_are_unavailable (kiem_tra_diagnostic.DiagnosticLoggerTests.test_record_takes_snapshot_and_nonfinite_values_are_unavailable) ... ok
+test_reopening_appends_without_duplicate_header (kiem_tra_diagnostic.DiagnosticLoggerTests.test_reopening_appends_without_duplicate_header) ... ok
+test_required_columns_missing_values_and_no_robot_feedback (kiem_tra_diagnostic.DiagnosticLoggerTests.test_required_columns_missing_values_and_no_robot_feedback) ... ok
+test_slow_disk_never_waits_in_record_and_queue_is_bounded (kiem_tra_diagnostic.DiagnosticLoggerTests.test_slow_disk_never_waits_in_record_and_queue_is_bounded) ... ok
+test_write_error_is_reported_and_future_records_are_dropped (kiem_tra_diagnostic.DiagnosticLoggerTests.test_write_error_is_reported_and_future_records_are_dropped) ... ok
+test_camera_read_failure_cleans_up_without_publishing_target (kiem_tra_main_phase2.MockMainPhase2Tests.test_camera_read_failure_cleans_up_without_publishing_target) ... ok
+test_default_windows_and_disabled_logging_are_preserved (kiem_tra_main_phase2.MockMainPhase2Tests.test_default_windows_and_disabled_logging_are_preserved) ... ok
+test_diagnostic_options_add_panel_and_frame_records_only (kiem_tra_main_phase2.MockMainPhase2Tests.test_diagnostic_options_add_panel_and_frame_records_only) ... ok
+test_main_d01_raw_outside_never_publishes_filtered_inside_target (kiem_tra_main_phase2.MockMainPhase2Tests.test_main_d01_raw_outside_never_publishes_filtered_inside_target) ... ok
+test_main_resize_resets_history_before_publishing_new_center (kiem_tra_main_phase2.MockMainPhase2Tests.test_main_resize_resets_history_before_publishing_new_center) ... ok
+test_no_robot_does_not_construct_or_start_any_link (kiem_tra_main_phase2.MockMainPhase2Tests.test_no_robot_does_not_construct_or_start_any_link) ... ok
+test_nonfinite_fps_is_rejected_before_any_device_or_logger (kiem_tra_main_phase2.MockMainPhase2Tests.test_nonfinite_fps_is_rejected_before_any_device_or_logger) ... ok
+test_swap_cli_routes_generated_targets_after_space_arms (kiem_tra_main_phase2.MockMainPhase2Tests.test_swap_cli_routes_generated_targets_after_space_arms) ... FAIL
+test_ema_equation_and_default_coefficient_are_preserved (kiem_tra_pipeline.PipelineValidationTests.test_ema_equation_and_default_coefficient_are_preserved) ... ok
+test_frame_row_is_unrounded_intent_not_a_send (kiem_tra_pipeline.PipelineValidationTests.test_frame_row_is_unrounded_intent_not_a_send) ... ok
+test_history_resets_on_repeated_resolution_changes (kiem_tra_pipeline.PipelineValidationTests.test_history_resets_on_repeated_resolution_changes) ... ok
+test_invalid_coordinate_shape_or_value_never_maps_as_valid (kiem_tra_pipeline.PipelineValidationTests.test_invalid_coordinate_shape_or_value_never_maps_as_valid) ... ok
+test_invalid_roi_configuration_is_rejected_or_hold (kiem_tra_pipeline.PipelineValidationTests.test_invalid_roi_configuration_is_rejected_or_hold) ... ok
+test_invalid_roi_or_workspace_never_maps_as_valid (kiem_tra_pipeline.PipelineValidationTests.test_invalid_roi_or_workspace_never_maps_as_valid) ... ok
+test_malformed_observations_omit_and_clear_history (kiem_tra_pipeline.PipelineValidationTests.test_malformed_observations_omit_and_clear_history) ... ok
+test_non_mapping_detections_and_invalid_size_hold (kiem_tra_pipeline.PipelineValidationTests.test_non_mapping_detections_and_invalid_size_hold) ... ok
+test_fragmented_request_and_newest_context_stay_correlated (kiem_tra_tcp_phase2.TcpPhase2Test.test_fragmented_request_and_newest_context_stay_correlated) ... ok
+test_invalid_request_gets_hold_then_valid_request_recovers (kiem_tra_tcp_phase2.TcpPhase2Test.test_invalid_request_gets_hold_then_valid_request_recovers) ... ok
+test_malformed_target_does_not_prevent_next_valid_send (kiem_tra_tcp_phase2.TcpPhase2Test.test_malformed_target_does_not_prevent_next_valid_send) ... ok
+test_malformed_targets_become_hold (kiem_tra_tcp_phase2.TcpPhase2Test.test_malformed_targets_become_hold) ... ok
+test_observer_failure_does_not_end_worker_session (kiem_tra_tcp_phase2.TcpPhase2Test.test_observer_failure_does_not_end_worker_session) ... ok
+test_overlong_complete_request_resets_connection (kiem_tra_tcp_phase2.TcpPhase2Test.test_overlong_complete_request_resets_connection) ... ok
+test_overlong_unterminated_request_resets_connection (kiem_tra_tcp_phase2.TcpPhase2Test.test_overlong_unterminated_request_resets_connection) ... ok
+test_reconnect_path_handles_overlong_request_like_socket_failure (kiem_tra_tcp_phase2.TcpPhase2Test.test_reconnect_path_handles_overlong_request_like_socket_failure) ... ok
+test_send_failure_never_creates_success_event (kiem_tra_tcp_phase2.TcpPhase2Test.test_send_failure_never_creates_success_event) ... ok
+test_socket_timeout_keeps_pending_fragment (kiem_tra_tcp_phase2.TcpPhase2Test.test_socket_timeout_keeps_pending_fragment) ... ok
+test_stale_target_send_is_hold_but_retains_frame_context (kiem_tra_tcp_phase2.TcpPhase2Test.test_stale_target_send_is_hold_but_retains_frame_context) ... ok
+test_target_and_flat_context_are_copied_at_publish (kiem_tra_tcp_phase2.TcpPhase2Test.test_target_and_flat_context_are_copied_at_publish) ... ok
+test_wire_format_signs_axes_and_precision_are_unchanged (kiem_tra_tcp_phase2.TcpPhase2Test.test_wire_format_signs_axes_and_precision_are_unchanged) ... ok
+test_all_roi_corners_remain_inclusive (kiem_tra_tich_hop_xy.SyntheticCoordinateIntegrationTests.test_all_roi_corners_remain_inclusive) ... ok
+test_created_target_and_actual_rounded_send_are_distinct (kiem_tra_tich_hop_xy.SyntheticCoordinateIntegrationTests.test_created_target_and_actual_rounded_send_are_distinct) ... ok
+test_d01_raw_outside_filtered_inside_must_send_hold (kiem_tra_tich_hop_xy.SyntheticCoordinateIntegrationTests.test_d01_raw_outside_filtered_inside_must_send_hold) ... ok
+test_disarmed_overrides_valid_positions_with_hold (kiem_tra_tich_hop_xy.SyntheticCoordinateIntegrationTests.test_disarmed_overrides_valid_positions_with_hold) ... ok
+test_disconnect_reconnect_uses_newest_target (kiem_tra_tich_hop_xy.SyntheticCoordinateIntegrationTests.test_disconnect_reconnect_uses_newest_target) ... ok
+test_filtered_outside_raw_inside_also_must_send_hold (kiem_tra_tich_hop_xy.SyntheticCoordinateIntegrationTests.test_filtered_outside_raw_inside_also_must_send_hold) ... ok
+test_idle_receive_timeout_preserves_connection_and_target (kiem_tra_tich_hop_xy.SyntheticCoordinateIntegrationTests.test_idle_receive_timeout_preserves_connection_and_target) ... ok
+test_left_and_right_route_to_their_default_links (kiem_tra_tich_hop_xy.SyntheticCoordinateIntegrationTests.test_left_and_right_route_to_their_default_links) ... ok
+test_low_visibility_is_hold_without_replaying_previous_target (kiem_tra_tich_hop_xy.SyntheticCoordinateIntegrationTests.test_low_visibility_is_hold_without_replaying_previous_target) ... ok
+test_missing_then_reacquired_point_does_not_reuse_old_ema (kiem_tra_tich_hop_xy.SyntheticCoordinateIntegrationTests.test_missing_then_reacquired_point_does_not_reuse_old_ema) ... ok
+test_outside_each_roi_edge_must_send_hold (kiem_tra_tich_hop_xy.SyntheticCoordinateIntegrationTests.test_outside_each_roi_edge_must_send_hold) ... ok
+test_positive_and_negative_x_preserve_sign_and_axis (kiem_tra_tich_hop_xy.SyntheticCoordinateIntegrationTests.test_positive_and_negative_x_preserve_sign_and_axis) ... ok
+test_positive_and_negative_y_preserve_sign_and_axis (kiem_tra_tich_hop_xy.SyntheticCoordinateIntegrationTests.test_positive_and_negative_y_preserve_sign_and_axis) ... ok
+test_resolution_change_keeps_new_frame_center_at_origin (kiem_tra_tich_hop_xy.SyntheticCoordinateIntegrationTests.test_resolution_change_keeps_new_frame_center_at_origin) ... ok
+test_stale_target_transmits_hold_even_if_frame_was_valid (kiem_tra_tich_hop_xy.SyntheticCoordinateIntegrationTests.test_stale_target_transmits_hold_even_if_frame_was_valid) ... ok
+test_swap_arms_changes_destination_not_coordinate_sign (kiem_tra_tich_hop_xy.SyntheticCoordinateIntegrationTests.test_swap_arms_changes_destination_not_coordinate_sign) ... ok
+
+======================================================================
+FAIL: test_swap_cli_routes_generated_targets_after_space_arms (kiem_tra_main_phase2.MockMainPhase2Tests.test_swap_cli_routes_generated_targets_after_space_arms)
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "C:\Users\lenovo\Điều khiển ABB\hand_pose-master\kiem_tra\phase2\kiem_tra_main_phase2.py", line 158, in test_swap_cli_routes_generated_targets_after_space_arms
+    self.assertEqual(left_calls[1].args[0], (-50.0, -50.0))
+AssertionError: Tuples differ: (-50.0, -49.999999999999986) != (-50.0, -50.0)
+
+First differing element 1:
+-49.999999999999986
+-50.0
+
+- (-50.0, -49.999999999999986)
++ (-50.0, -50.0)
+
+----------------------------------------------------------------------
+Ran 56 tests in 14.098s
+
+FAILED (failures=1)

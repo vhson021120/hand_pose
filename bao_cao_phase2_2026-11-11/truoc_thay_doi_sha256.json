@@ -1,0 +1,26 @@
+﻿[
+    {
+        "path":  "run.py",
+        "sha256":  "4626a45bcef0e2ab7f5e5cdf09db6c73f9cd597d0c2a721262e8e9c66d46fc54"
+    },
+    {
+        "path":  "tien_ich/theo_doi_co_tay_2d.py",
+        "sha256":  "27e6e46f78492cf390f6d2c5f0e9f3717d19d24111dbe22405cf92ad33541e60"
+    },
+    {
+        "path":  "tien_ich/ket_noi_yumi.py",
+        "sha256":  "d4bd00b848835d645a1818f094e45a26ce17e953ef87a945d38464be2f466a44"
+    },
+    {
+        "path":  "bao_cao_offline_2026-11-11/kiem_thu_bo_sung.py",
+        "sha256":  "85097a263bc568f858f9878ce356b058c56b93d5ead3d6ca05463d23a0040cc6"
+    },
+    {
+        "path":  "README.md",
+        "sha256":  "96159298fe82f537894953697fb821a03537f0f36802c5544a163a8b96dad5d0"
+    },
+    {
+        "path":  "robot/HandFollow.mod",
+        "sha256":  "1d55047a1288024b937950f2e5d274ce073c06a1ad3d8e01260825a98a13b583"
+    }
+]

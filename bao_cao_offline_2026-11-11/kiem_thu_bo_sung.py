@@ -1,6 +1,7 @@
 """Supplemental offline checks; synthetic inputs, never measured camera data.
 
-Characterization tests assert current behavior, including known limitations.
+Phase 2 updates turn corrected limitations into regression expectations.
+The original 31-test snapshot is preserved in the Phase 2 backup folder.
 TCP checks reuse FakeRobotTask and allow only 127.0.0.1 connections.
 Run from the repository: python bao_cao_offline_2026-11-11/kiem_thu_bo_sung.py -v
 """
@@ -88,16 +89,15 @@ class MappingChecks(unittest.TestCase):
                          (35.0, 0.0))
         self.assertMapping((740, 360), (100 * 25 / 48, 0, True))
 
-    def test_zero_width_roi_currently_raises(self):
-        with self.assertRaises(ZeroDivisionError):
-            wrist_to_workspace_mm((0, 0), (0.0, 0.0, 0.0, 1.0), WORK)
+    def test_zero_width_roi_is_invalid(self):
+        self.assertEqual(wrist_to_workspace_mm((0, 0), (0.0, 0.0, 0.0, 1.0), WORK),
+                         (0.0, 0.0, False))
 
     def test_nonfinite_mapping_characterization(self):
         result = wrist_to_workspace_mm((float('nan'), 360), ROI, WORK)
-        self.assertTrue(math.isnan(result[0]))
-        self.assertFalse(result[2])
-        self.assertMapping((float('inf'), 360), (200, 0, False))
-        self.assertMapping((-float('inf'), 360), (-200, 0, False))
+        self.assertEqual(result, (0.0, 0.0, False))
+        self.assertMapping((float('inf'), 360), (0, 0, False))
+        self.assertMapping((-float('inf'), 360), (0, 0, False))
 
     def test_flip_reflects_x_without_touching_y(self):
         # A synthetic three-channel array; no camera or model is opened.
@@ -136,9 +136,8 @@ class TrackerChecks(unittest.TestCase):
                 with self.subTest(value=value, index=index):
                     self.assertEqual(WristXYTracker().update({'LEFT': point}), {})
 
-    def test_nonnumeric_input_currently_raises(self):
-        with self.assertRaises(ValueError):
-            WristXYTracker().update({'LEFT': ('bad', 20, 0.9)})
+    def test_nonnumeric_input_is_omitted(self):
+        self.assertEqual(WristXYTracker().update({'LEFT': ('bad', 20, 0.9)}), {})
 
     def test_missing_one_arm_resets_only_that_history(self):
         tracker = WristXYTracker(0.25)
@@ -149,7 +148,16 @@ class TrackerChecks(unittest.TestCase):
         self.assertEqual(result['RIGHT'][:2], (220.0, 100.0))
 
     def test_raw_outside_can_remain_inside_after_ema(self):
-        # Characterizes the existing ROI-after-EMA behavior, not a fix.
+        # EMA is unchanged; Phase 2 target gating independently rejects raw-outside.
+        from run import process_wrist_frame
+        pipeline_tracker = WristXYTracker(0.25)
+        process_wrist_frame(pipeline_tracker, {'LEFT': (640, 360, 0.9)},
+                            (1280, 720), WORK, 0.8, armed=True)
+        _, _, rows = process_wrist_frame(pipeline_tracker, {'LEFT': (1100, 360, 0.9)},
+                                         (1280, 720), WORK, 0.8, armed=True)
+        self.assertFalse(rows[0]['raw_inside_roi'])
+        self.assertTrue(rows[0]['filtered_inside_roi'])
+        self.assertFalse(rows[0]['target_valid'])
         tracker = WristXYTracker(0.25)
         tracker.update({'LEFT': (640, 360, 0.9)})
         self.assertFalse(wrist_to_workspace_mm((1100, 360), ROI, WORK)[2])
@@ -164,22 +172,21 @@ class TrackerChecks(unittest.TestCase):
         result = tracker.update({'LEFT': (1100, 360, 0.9)})['LEFT']
         self.assertFalse(wrist_to_workspace_mm(result, ROI, WORK)[2])
 
-    def test_finite_extreme_points_can_overflow_ema(self):
+    def test_finite_extreme_ema_output_is_omitted(self):
         tracker = WristXYTracker(0.25)
         tracker.update({'LEFT': (1e308, 0, 0.9)})
         with np.errstate(over='ignore', invalid='ignore'):
             result = tracker.update({'LEFT': (-1e308, 0, 0.9)})
-        self.assertFalse(math.isfinite(result['LEFT'][0]))
+        self.assertEqual(result, {})
 
-    def test_frame_resize_keeps_old_pixel_history(self):
+    def test_frame_resize_resets_old_pixel_history(self):
         tracker = WristXYTracker(0.25)
-        tracker.update({'LEFT': (640, 360, 0.9)})
+        tracker.update({'LEFT': (640, 360, 0.9)}, image_size=(1280, 720))
         # New frame is half width and height; normalized wrist is still centered.
-        result = tracker.update({'LEFT': (320, 180, 0.9)})['LEFT']
+        result = tracker.update({'LEFT': (320, 180, 0.9)}, image_size=(640, 360))['LEFT']
         new_roi = compute_workspace_roi((640, 360), WORK, 0.8)
         mapped = wrist_to_workspace_mm(result, new_roi, WORK)
-        self.assertNotEqual(mapped[:2], (0.0, 0.0))
-        self.assertFalse(mapped[2])
+        self.assertEqual(mapped, (0.0, 0.0, True))
 
 
 class MessageChecks(unittest.TestCase):
@@ -203,10 +210,10 @@ class MessageChecks(unittest.TestCase):
             self.assertEqual(format_target((value, 2)), b'0,0.0,0.0\n')
             self.assertEqual(format_target((2, value)), b'0,0.0,0.0\n')
 
-    def test_malformed_target_currently_raises(self):
+    def test_malformed_target_is_hold(self):
         for target in [(1,), (1, 2, 3), ('bad', 1)]:
-            with self.subTest(target=target), self.assertRaises(ValueError):
-                format_target(target)
+            with self.subTest(target=target):
+                self.assertEqual(format_target(target), b'0,0.0,0.0\n')
 
     def test_latest_target_age_and_expiry_without_sleep(self):
         link = YumiArmLink('TEST', '127.0.0.1', 1, max_age=0.5)
@@ -287,10 +294,10 @@ class LoopbackChecks(unittest.TestCase):
         self.link.set_target((-1, 2))
         self.assertEqual(self.robot.request(), '1,-1.0,2.0\n')
 
-    def test_unexpected_newline_message_currently_also_gets_reply(self):
-        # Current implementation ignores request content before each newline.
+    def test_unexpected_newline_message_gets_hold(self):
+        # Phase 2 preserves the reply format but rejects requests other than R.
         self.robot.client.sendall(b'NOT_R\n')
-        self.assertEqual(self.read_lines(1), [b'1,12.3,-56.8\n'])
+        self.assertEqual(self.read_lines(1), [b'0,0.0,0.0\n'])
 
 
 if __name__ == '__main__':
