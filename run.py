@@ -11,7 +11,8 @@ import numpy as np
 
 from tien_ich.nhan_dien_ban_tay import MediaPipeHandDetector
 from tien_ich.nhan_dien_co_tay import MediaPipeWristDetector
-from tien_ich.theo_doi_co_tay_2d import WristXYTracker
+from tien_ich.ket_noi_yumi import YumiArmLink
+from tien_ich.theo_doi_co_tay_2d import WristXYTracker, wrist_to_workspace_mm
 
 
 HAND_CONNECTIONS = (
@@ -62,6 +63,21 @@ def draw_workspace_rect(frame, roi):
                 cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 200, 255), 1, cv2.LINE_AA)
 
 
+def draw_robot_status(canvas, armed, links):
+    if links is None:
+        cv2.putText(canvas, "ROBOT: OFF (--no-robot)", (560, 40),
+                    cv2.FONT_HERSHEY_SIMPLEX, 0.6, (165, 181, 194), 2, cv2.LINE_AA)
+        return
+    if armed:
+        text, color = "ROBOT: ARMED  [SPACE = STOP]", (60, 60, 255)
+    else:
+        text, color = "ROBOT: HOLD  [SPACE = START]", (0, 185, 255)
+    cv2.putText(canvas, text, (560, 40), cv2.FONT_HERSHEY_SIMPLEX, 0.6, color, 2, cv2.LINE_AA)
+    parts = [f"{link.name} {'OK' if link.connected else '--'}" for link in links.values()]
+    cv2.putText(canvas, "   ".join(parts), (560, 77), cv2.FONT_HERSHEY_SIMPLEX,
+                0.52, (165, 181, 194), 1, cv2.LINE_AA)
+
+
 def draw_wrist_xy_dashboard(wrists, roi, work_mm, pose_count):
     canvas = np.full((720, 960, 3), (20, 27, 35), dtype=np.uint8)
     max_width, max_height = 776, 484
@@ -107,12 +123,9 @@ def draw_wrist_xy_dashboard(wrists, roi, work_mm, pose_count):
         if wrist is None:
             value_lines.append(f"{side}: NOT DETECTED")
             continue
-        x, y, _ = wrist
-        u = float(np.clip((x - roi[0]) / (roi[2] - roi[0]), 0, 1))
-        v = float(np.clip((y - roi[1]) / (roi[3] - roi[1]), 0, 1))
-        x_mm = (u - 0.5) * work_mm[0]
-        y_mm = (0.5 - v) * work_mm[1]
-        inside = roi[0] <= x <= roi[2] and roi[1] <= y <= roi[3]
+        x_mm, y_mm, inside = wrist_to_workspace_mm(wrist, roi, work_mm)
+        u = x_mm / work_mm[0] + 0.5
+        v = 0.5 - y_mm / work_mm[1]
         dot_x = plot_left + int(u * plot_width)
         dot_y = plot_top + int(v * plot_height)
         cv2.circle(canvas, (dot_x, dot_y), 9, color, -1, cv2.LINE_AA)
@@ -181,6 +194,14 @@ def main() -> int:
                         help="fraction of the camera frame the workspace occupies")
     parser.add_argument("--wrist-visibility", type=float, default=0.7)
     parser.add_argument("--smoothing", type=float, default=0.25)
+    parser.add_argument("--robot-ip", default="192.168.125.1",
+                        help="YuMi controller IP running robot/HandFollow.mod")
+    parser.add_argument("--left-port", type=int, default=1025, help="port of T_ROB_L")
+    parser.add_argument("--right-port", type=int, default=1026, help="port of T_ROB_R")
+    parser.add_argument("--swap-arms", action="store_true",
+                        help="left wrist drives ROB_R and right wrist drives ROB_L")
+    parser.add_argument("--no-robot", action="store_true",
+                        help="only track, do not connect to the robot")
     args = parser.parse_args()
 
     if args.camera_width <= 0 or args.camera_height <= 0:
@@ -205,7 +226,18 @@ def main() -> int:
     pose_detector = None
     hand_detector = None
     tracker = WristXYTracker(args.smoothing, args.wrist_visibility)
+    links = None
+    armed = False
     try:
+        if not args.no_robot:
+            left_link = YumiArmLink("ROB_L", args.robot_ip, args.left_port).start()
+            right_link = YumiArmLink("ROB_R", args.robot_ip, args.right_port).start()
+            if args.swap_arms:
+                links = {"LEFT": right_link, "RIGHT": left_link}
+            else:
+                links = {"LEFT": left_link, "RIGHT": right_link}
+            print(f"Robot links -> {args.robot_ip}:{args.left_port} (ROB_L), "
+                  f"{args.robot_ip}:{args.right_port} (ROB_R). Press SPACE to arm.")
         pose_detector = MediaPipeWristDetector(
             args.pose_model,
             num_poses=1,
@@ -234,17 +266,33 @@ def main() -> int:
             webcam_view = draw_webcam_overlay(frame, wrists, hands)
             draw_workspace_rect(webcam_view, roi)
             xy_view = draw_wrist_xy_dashboard(wrists, roi, work_mm, len(pose_results))
+            if links is not None:
+                for side, link in links.items():
+                    target = None
+                    wrist = wrists.get(side)
+                    if armed and wrist is not None:
+                        x_mm, y_mm, inside = wrist_to_workspace_mm(wrist, roi, work_mm)
+                        # Outside the workspace the arm holds instead of jumping to the edge.
+                        target = (x_mm, y_mm) if inside else None
+                    link.set_target(target)
+            draw_robot_status(xy_view, armed, links)
             cv2.imshow("Webcam", webcam_view)
             cv2.imshow("Wrist XY", xy_view)
             key = cv2.waitKey(1) & 0xFF
             if key in (ord("q"), 27):
                 break
+            if key == ord(" ") and links is not None:
+                armed = not armed
+                print("Robot ARMED" if armed else "Robot HOLD")
             if (
                 cv2.getWindowProperty("Webcam", cv2.WND_PROP_VISIBLE) < 1
                 or cv2.getWindowProperty("Wrist XY", cv2.WND_PROP_VISIBLE) < 1
             ):
                 break
     finally:
+        if links is not None:
+            for link in set(links.values()):
+                link.close()
         camera.release()
         if pose_detector is not None:
             pose_detector.close()

@@ -50,6 +50,24 @@ class WristXYTracker:
         }
 
 
+def wrist_to_workspace_mm(
+    point: Sequence[float],
+    roi: Tuple[float, float, float, float],
+    work_mm: Tuple[float, float],
+) -> Tuple[float, float, bool]:
+    """Map an image point to workspace mm (origin at the ROI center, Y up).
+
+    Values are clamped to the workspace edges; ``inside`` tells whether the
+    point was really inside the ROI.
+    """
+    x, y = float(point[0]), float(point[1])
+    left, top, right, bottom = roi
+    u = min(max((x - left) / (right - left), 0.0), 1.0)
+    v = min(max((y - top) / (bottom - top), 0.0), 1.0)
+    inside = left <= x <= right and top <= y <= bottom
+    return (u - 0.5) * work_mm[0], (0.5 - v) * work_mm[1], inside
+
+
 def screen_pixel_to_centered_mm(
     point: Sequence[float],
     image_size: Tuple[int, int],
