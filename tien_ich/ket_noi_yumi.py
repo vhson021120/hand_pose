@@ -2,7 +2,8 @@
 
 The robot task is the TCP server. It sends "R\\n" whenever it is ready for the
 next motion step and this link answers with the newest target only, so stale
-targets never queue up on the controller.
+targets never queue up on the controller. "R,G\\n" opts into a fourth gripper
+field: -1 HOLD, 1 OPEN, 0 CLOSED. Legacy "R\\n" keeps the three-field reply.
 """
 
 import math
@@ -16,6 +17,19 @@ from typing import Callable, Optional, Tuple
 Target = Optional[Tuple[float, float]]
 HOLD_MESSAGE = b"0,0.0,0.0\n"
 MAX_REQUEST_BYTES = 64
+
+
+def utc_timestamp():
+    """UTC wall-clock time for frame/send diagnostics, not target-age timing."""
+    return datetime.now(timezone.utc).isoformat(timespec="milliseconds")
+
+
+def _normalize_gripper(command):
+    # Reject booleans, strings and fractional values rather than coercing an
+    # uncertain command into an actuator request.
+    if isinstance(command, bool) or not isinstance(command, (int, float)):
+        return None
+    return int(command) if command in (0, 1) else None
 
 
 def _normalize_target(target) -> Target:
@@ -33,13 +47,19 @@ def _normalize_target(target) -> Target:
     return x, y
 
 
-def format_target(target: Target) -> bytes:
-    """Encode a target as "<valid>,<x_mm>,<y_mm>\\n"; None means hold position."""
+def format_target(target: Target, gripper=None, *, include_gripper=False) -> bytes:
+    """Encode a legacy XY reply, optionally adding the negotiated gripper field."""
     target = _normalize_target(target)
     if target is None:
-        return HOLD_MESSAGE
-    x, y = target
-    return f"1,{x:.1f},{y:.1f}\n".encode("ascii")
+        message = HOLD_MESSAGE
+        gripper = None
+    else:
+        x, y = target
+        message = f"1,{x:.1f},{y:.1f}\n".encode("ascii")
+    if include_gripper:
+        command = _normalize_gripper(gripper)
+        return message[:-1] + f",{command if command is not None else -1}\n".encode("ascii")
+    return message
 
 
 class YumiArmLink:
@@ -63,6 +83,7 @@ class YumiArmLink:
         self.connected = False
         self._lock = threading.Lock()
         self._target: Target = None
+        self._gripper = None
         self._context = {}
         self._stamp = 0.0
         self._stop = threading.Event()
@@ -72,7 +93,7 @@ class YumiArmLink:
         self._thread.start()
         return self
 
-    def set_target(self, target: Target, context=None) -> None:
+    def set_target(self, target: Target, context=None, *, gripper=None) -> None:
         """Publish an immutable target and its frame metadata, or HOLD.
 
         ``context`` is a flat diagnostic mapping. It describes the generated
@@ -82,27 +103,28 @@ class YumiArmLink:
         context = dict(context) if isinstance(context, Mapping) else {}
         with self._lock:
             self._target = target
+            self._gripper = _normalize_gripper(gripper) if target is not None else None
             self._context = context
             self._stamp = time.monotonic()
 
-    def _snapshot_message(self, request_valid=True):
+    def _snapshot_message(self, request_valid=True, include_gripper=False):
         with self._lock:
             target, stamp = self._target, self._stamp
+            gripper = self._gripper
             context = self._context.copy()
         # This prevents publishing a stale motion target; it does not cancel
         # a MoveL already accepted by the controller.
         if not request_valid or time.monotonic() - stamp > self.max_age:
             target = None
-        return format_target(target), context
+        return format_target(target, gripper, include_gripper=include_gripper), context
 
-    def current_message(self) -> bytes:
-        return self._snapshot_message()[0]
 
     def _report_send(self, message: bytes, context: dict) -> None:
         if self.on_send is None:
             return
-        send_timestamp = datetime.now(timezone.utc).isoformat(timespec="milliseconds")
-        valid, x, y = message.decode("ascii").strip().split(",")
+        send_timestamp = utc_timestamp()
+        fields = message.decode("ascii").strip().split(",")
+        valid, x, y = fields[:3]
         event = context.copy()
         event.setdefault("timestamp", send_timestamp)
         event.setdefault("data_source", "CAMERA_UNVERIFIED")
@@ -115,6 +137,9 @@ class YumiArmLink:
             send_timestamp=send_timestamp,
             tcp_connected=True,
             robot_feedback="NOT_AVAILABLE",
+            gripper_protocol=len(fields) == 4,
+            gripper_sent=({"1": "OPEN", "0": "CLOSED"}.get(fields[3], "HOLD")
+                          if len(fields) == 4 else "HOLD"),
         )
         # Diagnostics are optional and cannot terminate the control worker.
         # Callers should use a nonblocking observer (the CSV logger queues).
@@ -124,6 +149,7 @@ class YumiArmLink:
             pass
 
     def close(self) -> None:
+        self.set_target(None)
         self._stop.set()
         if self._thread.is_alive():
             self._thread.join(timeout=3)
@@ -159,7 +185,8 @@ class YumiArmLink:
                 if len(request) > MAX_REQUEST_BYTES:
                     raise OSError("TCP request exceeds maximum line length")
                 message, context = self._snapshot_message(
-                    request_valid=request in (b"R", b"R\r")
+                    request_valid=request in (b"R", b"R\r", b"R,G", b"R,G\r"),
+                    include_gripper=request in (b"R,G", b"R,G\r"),
                 )
                 sock.sendall(message)
                 # A successful sendall means bytes were handed to the socket,

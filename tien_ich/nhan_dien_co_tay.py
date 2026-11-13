@@ -1,12 +1,12 @@
-import ctypes
 import math
-import os
 from pathlib import Path
 from time import perf_counter_ns
 from typing import Dict, List, Tuple
 
 import cv2
 import numpy as np
+
+from tien_ich.nhan_dien_ban_tay import create_mediapipe_task
 
 
 class MediaPipeWristDetector:
@@ -35,31 +35,21 @@ class MediaPipeWristDetector:
         model_path = str(Path(model_path).absolute())
         if not Path(model_path).is_file():
             raise FileNotFoundError(f"MediaPipe pose model was not found: {model_path}")
-        if os.name == "nt":
-            short_path = ctypes.create_unicode_buffer(260)
-            if ctypes.windll.kernel32.GetShortPathNameW(model_path, short_path, len(short_path)):
-                model_path = short_path.value
+        # Native Windows file APIs can misread Vietnamese model paths.
+        model_bytes = Path(model_path).read_bytes()
 
         self.image_module = image_module
         self.min_visibility = min_visibility
         self.last_timestamp = 0
         options = vision.PoseLandmarkerOptions(
-            base_options=base_options.BaseOptions(model_asset_path=model_path),
+            base_options=base_options.BaseOptions(model_asset_buffer=model_bytes),
             running_mode=vision.RunningMode.VIDEO,
             num_poses=num_poses,
             min_pose_detection_confidence=min_confidence,
             min_pose_presence_confidence=min_confidence,
             min_tracking_confidence=min_confidence,
         )
-        working_directory = Path.cwd()
-        if os.name == "nt":
-            short_cwd = ctypes.create_unicode_buffer(260)
-            if ctypes.windll.kernel32.GetShortPathNameW(str(working_directory), short_cwd, len(short_cwd)):
-                os.chdir(short_cwd.value)
-        try:
-            self.landmarker = vision.PoseLandmarker.create_from_options(options)
-        finally:
-            os.chdir(working_directory)
+        self.landmarker = create_mediapipe_task(vision.PoseLandmarker.create_from_options, options)
 
     def detect(self, image: np.ndarray) -> List[Dict[str, Tuple[float, float, float]]]:
         height, width = image.shape[:2]

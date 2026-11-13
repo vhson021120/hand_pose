@@ -4,15 +4,23 @@ MODULE HandFollow
     !
     ! Load this SAME module into both T_ROB_L and T_ROB_R. Each task opens its
     ! own TCP server: T_ROB_L on PORT_L, T_ROB_R on PORT_R.
-    ! Requires RobotWare option 616-1 PC Interface (socket messaging).
+    ! Requires RobotWare option 616-1 PC Interface (socket messaging), plus
+    ! the ABB SmartGripper add-in (g_* interface) in both motion tasks.
+    ! Commission/calibrate both grippers before running this routine. There
+    ! is deliberately no automatic initialization, homing or calibration.
     ! Uses the plane work object already declared in each task:
     !   T_ROB_L -> WOBJ_NAME_L, T_ROB_R -> WOBJ_NAME_R (copied into wFollow).
     !
     ! Protocol (one request/reply per motion step, so data never piles up):
-    !   robot  -> laptop : "R\0A"
-    !   laptop -> robot  : "<valid>,<x_mm>,<y_mm>\0A"   e.g. "1,12.5,-40.0"
+    !   robot  -> laptop : "R,G\0A" (opt in to the gripper field)
+    !   laptop -> robot  : "<valid>,<x_mm>,<y_mm>,<grip>\0A"
+    !   e.g. "1,12.5,-40.0,1". Three-field replies also work (grip HOLD).
     !   valid = 1 : move to (x, y) in wobjPlaneXY, relative to the center point
-    !   valid = 0 : hand lost or robot disarmed on the laptop -> hold position
+    !   valid = 0 : hand lost or robot disarmed -> no new motion/grip command
+    !   grip = 1 : open; 0 : close inward; -1 : no new gripper command
+    ! Install the matching new laptop code: old code rejects R,G with HOLD.
+    ! HOLD never opens a held object, and does not cancel an accepted MoveL
+    ! or an already-running gripper operation. No gripper feedback is sent.
     !
     ! Start: jog both arms to the point that should be the center (0, 0) of the
     ! hand workspace, then set PP to routine rHandFollow in both tasks and run.
@@ -38,6 +46,11 @@ MODULE HandFollow
     CONST speeddata vFollow := [150, 200, 5000, 1000];
     CONST zonedata zFollow := z5;
 
+    ! Adapt these values to the fitted fingers, configured physical limit
+    ! and workpiece. g_MoveTo opens without pushing against the end stop.
+    CONST num GRIP_OPEN_MM := 24;
+    CONST num GRIP_FORCE_N := 5;
+
     TASK PERS tooldata tFollow := [TRUE, [[0, 0, 0], [1, 0, 0, 0]], [0.001, [0, 0, 0.001], [1, 0, 0, 0], 0, 0, 0]];
     TASK PERS wobjdata wFollow := [FALSE, TRUE, "", [[0, 0, 0], [1, 0, 0, 0]], [[0, 0, 0], [1, 0, 0, 0]]];
 
@@ -46,6 +59,7 @@ MODULE HandFollow
     VAR robtarget pCenter;
     VAR num lastX;
     VAR num lastY;
+    VAR num lastGrip := -1;
 
     PROC rHandFollow()
         VAR num port;
@@ -84,6 +98,7 @@ MODULE HandFollow
             ! Start from the current position, not from the last target.
             lastX := 9999;
             lastY := 9999;
+            lastGrip := -1;
             FollowLoop;
         ENDWHILE
     ENDPROC
@@ -93,12 +108,16 @@ MODULE HandFollow
         VAR num valid;
         VAR num x;
         VAR num y;
+        VAR num grip;
         VAR robtarget pTarget;
 
         WHILE TRUE DO
-            SocketSend client \Str:="R\0A";
+            SocketSend client \Str:="R,G\0A";
             line := ReadLine();
-            IF ParseTarget(line, valid, x, y) AND valid = 1 THEN
+            IF ParseTarget(line, valid, x, y, grip) AND valid = 1 THEN
+                ! Independent of XY deadband: a stationary wrist can still
+                ! open/close the gripper attached to this task's robot arm.
+                ApplyGripper grip;
                 x := Clamp(x, LIMIT_X);
                 y := Clamp(y, LIMIT_Y);
                 IF Abs(x - lastX) >= DEADBAND OR Abs(y - lastY) >= DEADBAND THEN
@@ -112,15 +131,35 @@ MODULE HandFollow
                     WaitTime 0.02;
                 ENDIF
             ELSE
+                lastGrip := -1;
                 WaitTime 0.02;
             ENDIF
         ENDWHILE
     ERROR
         IF ERRNO = ERR_SOCK_CLOSED OR ERRNO = ERR_SOCK_TIMEOUT THEN
             TPWrite GetTaskName() + ": laptop disconnected";
+            lastGrip := -1;
             SocketClose client;
             RETURN;
         ENDIF
+        ! Preserve SmartGripper/calibration and motion errors for the caller.
+        RAISE;
+    ENDPROC
+
+    PROC ApplyGripper(num grip)
+        IF grip = -1 THEN
+            ! Re-acquisition of a stable sign must send a fresh command.
+            lastGrip := -1;
+            RETURN;
+        ENDIF
+        IF grip = lastGrip RETURN;
+        IF grip = 1 THEN
+            g_MoveTo GRIP_OPEN_MM, \NoWait;
+        ELSEIF grip = 0 THEN
+            g_GripIn \holdForce:=GRIP_FORCE_N, \NoWait;
+        ENDIF
+        ! This remembers a command, not confirmation of physical position.
+        lastGrip := grip;
     ENDPROC
 
     FUNC string ReadLine()
@@ -134,19 +173,36 @@ MODULE HandFollow
         RETURN buffer;
     ENDFUNC
 
-    FUNC bool ParseTarget(string line, INOUT num valid, INOUT num x, INOUT num y)
+    FUNC bool ParseTarget(string line, INOUT num valid, INOUT num x, INOUT num y, INOUT num grip)
         VAR num c1;
         VAR num c2;
+        VAR num c3;
         VAR num endPos;
+        VAR string ending;
 
+        grip := -1;
+        endPos := StrFind(line, 1, "\0D\0A");
+        IF endPos > StrLen(line) RETURN FALSE;
+        ending := StrPart(line, endPos, StrLen(line) - endPos + 1);
+        IF ending <> "\0A" AND ending <> "\0D\0A" RETURN FALSE;
         c1 := StrFind(line, 1, ",");
-        IF c1 >= StrLen(line) RETURN FALSE;
+        IF c1 <= 1 OR c1 >= endPos RETURN FALSE;
         c2 := StrFind(line, c1 + 1, ",");
-        IF c2 >= StrLen(line) RETURN FALSE;
-        endPos := StrFind(line, c2 + 1, "\0D\0A");
+        IF c2 <= c1 + 1 OR c2 >= endPos RETURN FALSE;
+        c3 := StrFind(line, c2 + 1, ",");
         IF NOT StrToVal(StrPart(line, 1, c1 - 1), valid) RETURN FALSE;
+        IF valid <> 0 AND valid <> 1 RETURN FALSE;
         IF NOT StrToVal(StrPart(line, c1 + 1, c2 - c1 - 1), x) RETURN FALSE;
-        IF NOT StrToVal(StrPart(line, c2 + 1, endPos - c2 - 1), y) RETURN FALSE;
+        IF c3 < endPos THEN
+            IF c3 <= c2 + 1 OR c3 >= endPos - 1 RETURN FALSE;
+            IF StrFind(line, c3 + 1, ",") < endPos RETURN FALSE;
+            IF NOT StrToVal(StrPart(line, c2 + 1, c3 - c2 - 1), y) RETURN FALSE;
+            IF NOT StrToVal(StrPart(line, c3 + 1, endPos - c3 - 1), grip) RETURN FALSE;
+            IF grip <> -1 AND grip <> 0 AND grip <> 1 RETURN FALSE;
+        ELSE
+            IF endPos <= c2 + 1 RETURN FALSE;
+            IF NOT StrToVal(StrPart(line, c2 + 1, endPos - c2 - 1), y) RETURN FALSE;
+        ENDIF
         RETURN TRUE;
     ENDFUNC
 
